@@ -1,0 +1,30 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:latest
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ECOS
+      POSTGRES_DB: mydatabase
+    restart: unless-stopped
+    hostname: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+volumes:
+  postgres:
+

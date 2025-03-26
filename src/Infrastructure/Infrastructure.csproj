@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AssemblyName>Ecos.Infrastructure</AssemblyName>
+        <RootNamespace>Ecos.Infrastructure</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Azure.Communication.Email" Version="1.0.1" />
+      <PackageReference Include="Microsoft.AspNetCore.Identity" Version="2.3.1" />
+      <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.14" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.14">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+      <PackageReference Include="Microsoft.Extensions.Identity.Stores" Version="8.0.14" />
+      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+      <PackageReference Include="RazorLight" Version="2.3.1" />
+      <PackageReference Include="WindowsAzure.Storage" Version="9.3.3" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Common\Common.csproj" />
+      <ProjectReference Include="..\Domain\Domain.csproj" />
+    </ItemGroup>
+
+</Project>
+
