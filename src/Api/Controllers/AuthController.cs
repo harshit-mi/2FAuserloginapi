@@ -6,8 +6,10 @@ using Ecos.Domain.Entities;
 using Ecos.Infrastructure.Services.Azure.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Identity.Data;
-using Ecos.Infrastructure.Emails.Templates.Models;
+using Ecos.Api.Emails.Templates.Models;
+using Ecos.Application.Services;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 
 namespace Ecos.Api.Controllers;
 
@@ -19,19 +21,22 @@ public class AuthController : ApiControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly IAuthLogTableService _authLogTableService;
     private readonly IEmailCommunicationService _emailService;
+    private readonly TokenService _tokenService;
 
     public AuthController(
         UserManager<User> userManager, 
         SignInManager<User> signInManager,
         ILogger<AuthController> logger, 
         IAuthLogTableService authLogService,
-        IEmailCommunicationService emailService)
+        IEmailCommunicationService emailService,
+        TokenService tokenService)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _logger = logger;
         _authLogTableService = authLogService;
         _emailService = emailService;
+        _tokenService = tokenService;
     }
 
     [HttpPost("login")]
@@ -45,17 +50,17 @@ public class AuthController : ApiControllerBase
         {
             _logger.LogWarning("Login attempt with non-existing email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "UserNotFound", ipAddress, userAgent);
-            return BadRequest(new { message = "Invalid email or password" });
+            return BadRequest(new { meta = new { code = 0, message = "Invalid email or password" } });
         }
-        
-        //var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: false);
-        //if (!result.Succeeded)
-        //{
-        //    string status = result.IsLockedOut ? "LockedOut" : "InvalidPassword";
-        //    _logger.LogWarning("Login attempt failed for email: {Email}, Status: {Status}", request.Email, status);
-        //    await _authLogTableService.LogLoginAttemptAsync(request.Email, status, ipAddress, userAgent);
-        //    return BadRequest(new { message = "Invalid email or password" });
-        //}
+
+        var result = await _signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: false);
+        if (!result.Succeeded)
+        {
+            string status = result.IsLockedOut ? "LockedOut" : "InvalidPassword";
+            _logger.LogWarning("Login attempt failed for email: {Email}, Status: {Status}", request.Email, status);
+            await _authLogTableService.LogLoginAttemptAsync(request.Email, status, ipAddress, userAgent);
+            return BadRequest(new { meta = new { code = 0, message = "Invalid email or password" } });
+        }
 
         string code = Generator.VerifyCode();
         
@@ -80,11 +85,11 @@ public class AuthController : ApiControllerBase
         obje.Code = code;
         // Send email with code
         // TODO USE THE CORRECT TEMPLATE AND MODEL -> Infrastructure/Emails/Templates/VerificationCode.cshtml
-        string emailBody = await _emailService.RenderViewToStringAsync("C:/MI/Projects/Ecos/ecos-api/src/Infrastructure/Emails/Templates/VerificationCode.cshtml", obje);
+        string emailBody = await _emailService.RenderViewToStringAsync("VerificationCode.cshtml", obje);
         await _emailService.SendEmailAsync(user.Email!, "Your login verification code", emailBody);
 
         _logger.LogInformation("Login attempt for {Email} successfully", request.Email);
-        return Ok(new { message = "Verification code sent to your email" });
+        return Ok(new { meta = new { code = 1, message = "Verification code sent to your email" } });
     }
 
     
@@ -99,7 +104,7 @@ public class AuthController : ApiControllerBase
         {
             _logger.LogWarning("Verification attempt with non-existing email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "UserNotFound", ipAddress);
-            return BadRequest(new { message = "Invalid verification attempt" });
+            return BadRequest(new { meta = new { code = 0, message = "Invalid email or password" } });
         }
         
         // Get stored code and expiration
@@ -117,7 +122,7 @@ public class AuthController : ApiControllerBase
         {
             _logger.LogWarning("No verification code found for email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "NoVerificationCode", ipAddress);
-            return BadRequest(new { message = "No verification code found" });
+            return BadRequest(new { meta = new { code = 0, message = "No verification code found" } });
         }
         
         // Check expiration
@@ -125,7 +130,7 @@ public class AuthController : ApiControllerBase
         {
             _logger.LogWarning("Verification code expired for email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "ExpiredCode", ipAddress);
-            return BadRequest(new { message = "Verification code has expired" });
+            return BadRequest(new { meta = new { code = 0, message = "No verification code found" } });
         }
         
         // Verify code
@@ -133,21 +138,25 @@ public class AuthController : ApiControllerBase
         {
             _logger.LogWarning("Invalid verification code for email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "InvalidCode", ipAddress);
-            return BadRequest(new { message = "Invalid verification code" });
+            return BadRequest(new { meta = new { code = 0, message = "Invalid verification code" } });
         }
         
         // Clear used tokens
         await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCode");
         await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCodeExpires");
 
+        string token = _tokenService.GenerateAuthToken(user.Id,user.UserName);
+        var refreshToken = _tokenService.GenerateRefreshToken();
+        // Store Refresh Token in Database
+        await _tokenService.StoreRefreshTokenAsync(user.Id, refreshToken);
         // Sign in user
-        await _signInManager.SignInAsync(user, isPersistent: request.RememberMe);
+        await _signInManager.SignInAsync(user, isPersistent: true);
 
         // Log successful login
         await _authLogTableService.LogLoginAttemptAsync(request.Email, "Success", ipAddress);
         
         _logger.LogInformation("User {Email} logged in successfully", request.Email);
-        return Ok(new { message = "Login successful" });
+        return Ok(new { meta = new { code = 1, message = "Login successful" }, data = new { authtoken = token, RefreshToken = refreshToken } });
     }
 
     [HttpPost("forgot-password")]
@@ -155,66 +164,59 @@ public class AuthController : ApiControllerBase
     {
         string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         string? userAgent = Request.Headers.UserAgent.ToString();
-        
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
             _logger.LogWarning("Password reset attempt with non-existing email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "ForgotPassword_UserNotFound", ipAddress, userAgent);
             // Return OK to prevent email enumeration attacks
-            return Ok(new { message = "If your email exists in our system, you will receive a password reset link." });
+            return Ok(new { meta = new { code = 1, message = "If your email exists in our system, you will receive a password reset link." } });
         }
-        
         // Generate reset token
         string token = await _userManager.GeneratePasswordResetTokenAsync(user);
-        
         // Create reset URL with token - typically this would be a frontend URL
         string encodedToken = WebUtility.UrlEncode(token);
         string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?email={request.Email}&token={encodedToken}";
-
+        ForgotPasswordViewModel obj = new ForgotPasswordViewModel();
+        obj.ResetUrl = resetUrl;
         // Send email with reset link
-        string emailBody = await _emailService.RenderViewToStringAsync("EmailTemplates/ResetPassword", resetUrl);
+        string emailBody = await _emailService.RenderViewToStringAsync("ForgotPassword.cshtml", obj);
         await _emailService.SendEmailAsync(user.Email!, "Reset Your Password", emailBody);
-
         // Log password reset request
         await _authLogTableService.LogLoginAttemptAsync(request.Email, "ForgotPassword_TokenSent", ipAddress, userAgent);
-
         _logger.LogInformation("Password reset email sent for {Email}", request.Email);
-    
-        return Ok(new { message = "If your email exists in our system, you will receive a password reset link." });
+        return Ok(new { meta = new { code = 1, message = "If your email exists in our system, you will receive a password reset link." } });
     }
-
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
         string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-    
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
             _logger.LogWarning("Password reset attempt with non-existing email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "ResetPassword_UserNotFound", ipAddress);
-            return BadRequest(new { message = "Invalid reset attempt." });
+            return BadRequest(new { meta = new { code = 0, message = "Invalid reset attempt." } });
         }
-        
-        var result = await _userManager.ResetPasswordAsync(user, request.ResetCode, request.NewPassword);
-
+        var decodedToken = WebUtility.UrlDecode(request.ResetToken);
+        var result = await _userManager.ResetPasswordAsync(user, decodedToken, request.NewPassword);
         if (!result.Succeeded)
         {
             string errors = string.Join(", ", result.Errors.Select(e => e.Description));
             _logger.LogWarning("Password reset failed for {Email}: {Errors}", request.Email, errors);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "ResetPassword_Failed", ipAddress);
-            return BadRequest(new { message = "Password reset failed.", errors });
+            return BadRequest(new { meta = new { code = 0, message = "Password reset failed.", errors } });
         }
-        
+        // Generate Auth and Refresh Tokens
+        var authToken = _tokenService.GenerateAuthToken(user.Id, user.UserName);
+        var refreshToken = _tokenService.GenerateRefreshToken();
+        // Store Refresh Token in Database
+        await _tokenService.StoreRefreshTokenAsync(user.Id, refreshToken);
         // Log password reset success
         await _authLogTableService.LogPasswordResetRequestAsync(request.Email, ipAddress);
-    
         _logger.LogInformation("Password reset successful for {Email}", request.Email);
-    
-        return Ok(new { message = "Your password has been reset successfully." });
+        return Ok(new { meta = new { code = 1, message = "Your password has been reset successfully." }, data = new { authtoken = authToken, RefreshToken = refreshToken } });
     }
-    
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
@@ -223,90 +225,95 @@ public class AuthController : ApiControllerBase
     }
 
     [HttpPost("resend-code")]
-    public async Task<IActionResult> ResendCode([FromBody] VerifyCodeRequest request)
+    public async Task<IActionResult> ResendCode([FromBody] ResendCodeRequest request)
     {
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
         var user = await _userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
             _logger.LogWarning("Resend code attempt with non-existing email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "UserNotFound", ipAddress);
-            return BadRequest(new { message = "Invalid resend attempt" });
+            return BadRequest(new { meta = new { code = 0, message = "Invalid resend attempt" } });
         }
-
         // Get expiration
         var expirationStr = await _userManager.GetAuthenticationTokenAsync(
-            user,
-            "LoginProvider",
-            "VerificationCodeExpires");
-
+        user,
+        "LoginProvider",
+        "VerificationCodeExpires");
         if (!string.IsNullOrEmpty(expirationStr))
         {
-            if (DateTime.TryParse(expirationStr, out var expiration) ||(DateTime.UtcNow - expiration).TotalMinutes < 1)
-            {
-                return BadRequest(new { message = "Please wait 1 minute before requesting a new code." });
-            }
-            else
-            {
-                // Clear used tokens
-                await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCode");
-                await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCodeExpires");
-
-                string code = Generator.VerifyCode();
-
-                // Store the code with user
-                await _userManager.SetAuthenticationTokenAsync(
-                    user,
-                    "LoginProvider",
-                    "VerificationCode",
-                    code);
-
-                // Set expiration token
-                await _userManager.SetAuthenticationTokenAsync(
-                    user,
-                    "LoginProvider",
-                    "VerificationCodeExpires",
-                    DateTime.UtcNow.AddMinutes(15).ToString("o"));
-
-                // Log verification code generation
-                await _authLogTableService.LogVerificationCodeAsync(request.Email, ipAddress);
-
-                // Send email with code
-                // TODO USE THE CORRECT TEMPLATE AND MODEL -> Infrastructure/Emails/Templates/VerificationCode.cshtml
-                string emailBody = await _emailService.RenderViewToStringAsync("EmailTemplates/VerificationCode", code);
-                await _emailService.SendEmailAsync(user.Email!, "Your login verification code", emailBody);
-            }
-        }
-        else
-        {
+            
+            // Clear used tokens
+            await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCode");
+            await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCodeExpires");
             string code = Generator.VerifyCode();
-
             // Store the code with user
             await _userManager.SetAuthenticationTokenAsync(
                 user,
                 "LoginProvider",
                 "VerificationCode",
-                code);
-
+            code);
             // Set expiration token
             await _userManager.SetAuthenticationTokenAsync(
                 user,
                 "LoginProvider",
                 "VerificationCodeExpires",
                 DateTime.UtcNow.AddMinutes(15).ToString("o"));
-
             // Log verification code generation
             await _authLogTableService.LogVerificationCodeAsync(request.Email, ipAddress);
-
+            VerificationCodeViewModel obje = new VerificationCodeViewModel();
+            obje.Code = code;
             // Send email with code
             // TODO USE THE CORRECT TEMPLATE AND MODEL -> Infrastructure/Emails/Templates/VerificationCode.cshtml
-            string emailBody = await _emailService.RenderViewToStringAsync("EmailTemplates/VerificationCode", code);
+            string emailBody = await _emailService.RenderViewToStringAsync("VerificationCode.cshtml", obje);
+           
+            await _emailService.SendEmailAsync(user.Email!, "Your login verification code", emailBody);
+            
+        }
+        else
+        {
+            string code = Generator.VerifyCode();
+            // Store the code with user
+            await _userManager.SetAuthenticationTokenAsync(
+            user,
+            "LoginProvider",
+            "VerificationCode",
+            code);
+            // Set expiration token
+            await _userManager.SetAuthenticationTokenAsync(
+            user,
+            "LoginProvider",
+            "VerificationCodeExpires",
+            DateTime.UtcNow.AddMinutes(15).ToString("o"));
+            // Log verification code generation
+            await _authLogTableService.LogVerificationCodeAsync(request.Email, ipAddress);
+            VerificationCodeViewModel obje = new VerificationCodeViewModel();
+            obje.Code = code;
+            // Send email with code
+            // TODO USE THE CORRECT TEMPLATE AND MODEL -> Infrastructure/Emails/Templates/VerificationCode.cshtml
+            string emailBody = await _emailService.RenderViewToStringAsync("VerificationCode.cshtml", obje);
+            // Send email with code
+            // TODO USE THE CORRECT TEMPLATE AND MODEL -> Infrastructure/Emails/Templates/VerificationCode.cshtml
+            //string emailBody = await _emailService.RenderViewToStringAsync("EmailTemplates/VerificationCode", code);
             await _emailService.SendEmailAsync(user.Email!, "Your login verification code", emailBody);
         }
+        //_logger.LogInformation("User {Email} logged in successfully", request.Email);
+        return Ok(new { meta = new { code = 1, message = "Verification code sent to your email" } });
+    }
 
-        _logger.LogInformation("User {Email} logged in successfully", request.Email);
-        return Ok(new { message = "Login successful" });
+    [HttpPost("refresh-token")]
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        var newAuthToken = await _tokenService.RefreshAuthTokenAsync(request.AuthToken, request.RefreshToken);
+        if (newAuthToken == null)
+        {
+            return Unauthorized(new { meta = new { code = 0, message = "Invalid refresh token or expired session." } });
+        }
+        return Ok(new
+        {
+            meta = new { code = 1, message = "Token refreshed successfully." },
+            data = new { authToken = newAuthToken, refreshToken = request.RefreshToken }
+        });
     }
     // TODO: Implement get user details, like name, email, 
 

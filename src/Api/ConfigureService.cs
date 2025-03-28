@@ -1,4 +1,5 @@
 ﻿using System.IO.Compression;
+using System.Text;
 using Ecos.Api.Constants;
 using Ecos.Application.Services;
 using Ecos.Common.Options;
@@ -8,10 +9,14 @@ using Ecos.Domain.Interfaces.DependencyInjection;
 using Ecos.Infrastructure.Data;
 using Ecos.Infrastructure.Services.Azure.Interfaces;
 using Ecos.Infrastructure.Services.Azure.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.Configuration;
+
 
 namespace Ecos.Api;
 
@@ -47,6 +52,11 @@ public static class ConfigureService
         services.AddScoped<IDataContext>(provider =>
             provider.GetRequiredService<DataContext>());
     }
+    
+        // Other services
+
+        
+    
 
     private static void AddIdentity(IServiceCollection services)
     {

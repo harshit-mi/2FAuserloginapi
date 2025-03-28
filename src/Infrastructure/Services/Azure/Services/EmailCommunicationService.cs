@@ -31,8 +31,8 @@ namespace Ecos.Infrastructure.Services.Azure.Services
         {
             try
             {
-                string fullPath =  viewPath;
-            
+                string fullPath = Path.Combine(Directory.GetCurrentDirectory(),"Emails","Templates", viewPath);
+
                 _logger.LogInformation("Attempting to read template from: {FullPath}", fullPath);
 
                 if (!File.Exists(fullPath))
