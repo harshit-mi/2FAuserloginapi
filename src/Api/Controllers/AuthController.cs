@@ -315,6 +315,17 @@ public class AuthController : ApiControllerBase
             data = new { authToken = newAuthToken, refreshToken = request.RefreshToken }
         });
     }
+
+    [HttpPost("verify-token")]
+    public IActionResult VerifyToken([FromBody] TokenVerificationRequest request)
+    {
+        var isValid = _tokenService.VerifyAuthToken(request.AuthToken);
+        if (!isValid)
+        {
+            return Unauthorized(new { meta = new { code = 0, message = "Invalid or expired token." } });
+        }
+        return Ok(new { meta = new { code = 1, message = "Token is valid." } });
+    }
     // TODO: Implement get user details, like name, email, 
 
     // TODO: Implement update user details, like name, email, etc.

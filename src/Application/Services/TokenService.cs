@@ -32,22 +32,25 @@ namespace Ecos.Application.Services
 
         public string GenerateAuthToken(string userId, string username)
         {
-            var claims = new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userId),
-                new Claim(ClaimTypes.Name, username),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
+            var expirationTime = DateTime.UtcNow.AddMinutes(1); // Token expires in 1 minute
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-            var token = new JwtSecurityToken(
-            issuer: _issuer,
-            audience: _audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(15),
-            signingCredentials: creds
-            );
-            return new JwtSecurityTokenHandler().WriteToken(token);
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, userId),
+                    new Claim(ClaimTypes.Name, username),
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                }),
+                Expires = expirationTime,
+                Issuer = _issuer,
+                Audience = _audience,
+                SigningCredentials = creds
+            };
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token); 
         }
         public string GenerateRefreshToken()
         {
@@ -105,6 +108,30 @@ namespace Ecos.Application.Services
             if (storedToken == null || storedToken.ExpiryDate <= DateTime.UtcNow)
                 return null;
             return GenerateAuthToken(userId, username);
+        }
+
+        public bool VerifyAuthToken(string token)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(_key);
+            try
+            {
+                tokenHandler.ValidateToken(token, new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = true,
+                    ValidIssuer = _issuer,
+                    ValidateAudience = false,
+                    ValidateLifetime = true, // Ensures token is not expired
+                    ClockSkew = TimeSpan.Zero // No extra time buffer for expiration
+                }, out _);
+                return true;
+            }
+            catch
+            {
+                return false; // Token is invalid or expired
+            }
         }
     }
 }
