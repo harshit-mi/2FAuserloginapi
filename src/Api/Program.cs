@@ -57,12 +57,9 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     options.InvalidModelStateResponseFactory = context =>
     {
         var errors = context.ModelState
-            .Where(e => e.Value.Errors.Count > 0)
-            .ToDictionary(
-                e => e.Key,
-                e => e.Value.Errors.Select(err => err.ErrorMessage).ToArray()
-            );
-
+        .Where(e => e.Value.Errors.Count > 0)
+        .SelectMany(e => e.Value.Errors.Select(err => err.ErrorMessage))
+        .ToList();
         var response = new
         {
             meta = new
@@ -71,7 +68,6 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
                 message = errors
             }
         };
-
         return new BadRequestObjectResult(response);
     };
 });
