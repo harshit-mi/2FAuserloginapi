@@ -1,5 +1,6 @@
 using System.Text;
 using Ecos.Api;
+using System.Net;
 using Ecos.Api.Constants;
 using Ecos.Application.Services;
 using Ecos.Domain.Interfaces;
@@ -10,6 +11,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.Listen(IPAddress.Any, 5001, listenOptions =>
+    {
+        listenOptions.UseHttps();
+    });
+});
 
 builder.Services.AddApiServices(builder.Configuration);
 
