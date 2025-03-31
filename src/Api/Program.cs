@@ -9,6 +9,7 @@ using Ecos.Infrastructure.Data.Seed;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -51,6 +52,29 @@ builder.Services.AddAuthentication(options =>
     };
 });
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        var errors = context.ModelState
+            .Where(e => e.Value.Errors.Count > 0)
+            .ToDictionary(
+                e => e.Key,
+                e => e.Value.Errors.Select(err => err.ErrorMessage).ToArray()
+            );
+
+        var response = new
+        {
+            meta = new
+            {
+                code = 0,
+                message = errors
+            }
+        };
+
+        return new BadRequestObjectResult(response);
+    };
+});
 
 var app = builder.Build();
 
