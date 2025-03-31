@@ -10,16 +10,14 @@ namespace Ecos.Application.DTOs.Request
 {
     public class ResetPasswordRequest
     {
-        [Required]
-        [EmailAddress]
-        public string Email { get; init; }
+
         [Required]
         public string ResetToken { get; init; }
         [Required]
         [MinLength(8, ErrorMessage = "Password must be at least 8 characters long.")]
-        [DisplayName("NewPassword")]
+        [DefaultValue("string")]
         [RegularExpression(@"^(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$",
-        ErrorMessage = "Password must contain at least one uppercase letter, one number, and one special character.")]
+ErrorMessage = "Password must contain at least one uppercase letter, one number, and one special character.")]
         public string NewPassword { get; init; }
         [Required]
         [Compare(nameof(NewPassword), ErrorMessage = "Confirm Password must match the new password.")]

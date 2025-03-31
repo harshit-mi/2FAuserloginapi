@@ -21,7 +21,7 @@ public class AuthController : ApiControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly IAuthLogTableService _authLogTableService;
     private readonly IEmailCommunicationService _emailService;
-    private readonly TokenService _tokenService;
+    private readonly ITokenService _tokenService;
 
     public AuthController(
         UserManager<User> userManager, 
@@ -29,7 +29,7 @@ public class AuthController : ApiControllerBase
         ILogger<AuthController> logger, 
         IAuthLogTableService authLogService,
         IEmailCommunicationService emailService,
-        TokenService tokenService)
+        ITokenService tokenService)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -176,7 +176,7 @@ public class AuthController : ApiControllerBase
         string token = await _userManager.GeneratePasswordResetTokenAsync(user);
         // Create reset URL with token - typically this would be a frontend URL
         string encodedToken = WebUtility.UrlEncode(token);
-        string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?email={request.Email}&token={encodedToken}";
+        string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={encodedToken}";
         ForgotPasswordViewModel obj = new ForgotPasswordViewModel();
         obj.ResetUrl = resetUrl;
         // Send email with reset link
@@ -190,31 +190,49 @@ public class AuthController : ApiControllerBase
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
+        var decodedToken = WebUtility.UrlDecode(request.ResetToken);
         string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var user = await _userManager.FindByEmailAsync(request.Email);
-        if (user == null)
+        var users = _userManager.Users.ToList();
+        User? foundUser = null;
+        foreach (var user in users)
         {
-            _logger.LogWarning("Password reset attempt with non-existing email: {Email}", request.Email);
-            await _authLogTableService.LogLoginAttemptAsync(request.Email, "ResetPassword_UserNotFound", ipAddress);
+            bool isValid = await _userManager.VerifyUserTokenAsync(user,
+            _userManager.Options.Tokens.PasswordResetTokenProvider,
+            "ResetPassword", decodedToken);
+            if (isValid)
+            {
+                foundUser = user;
+                break; // Stop once we find a valid user
+            }
+        }
+        if (foundUser == null)
+        {
+            _logger.LogWarning("Invalid password reset token.");
+            return BadRequest(new { meta = new { code = 0, message = "Invalid or expired token." } });
+        }
+        string email = foundUser.Email;
+        if (foundUser == null)
+        {
+            _logger.LogWarning("Password reset attempt with non-existing email: {Email}", email);
+            await _authLogTableService.LogLoginAttemptAsync(email, "ResetPassword_UserNotFound", ipAddress);
             return BadRequest(new { meta = new { code = 0, message = "Invalid reset attempt." } });
         }
-        var decodedToken = WebUtility.UrlDecode(request.ResetToken);
-        var result = await _userManager.ResetPasswordAsync(user, decodedToken, request.NewPassword);
+        var result = await _userManager.ResetPasswordAsync(foundUser, decodedToken, request.NewPassword);
         if (!result.Succeeded)
         {
-            string errors = string.Join(", ", result.Errors.Select(e => e.Description));
-            _logger.LogWarning("Password reset failed for {Email}: {Errors}", request.Email, errors);
-            await _authLogTableService.LogLoginAttemptAsync(request.Email, "ResetPassword_Failed", ipAddress);
-            return BadRequest(new { meta = new { code = 0, message = "Password reset failed.", errors } });
+            string errors1 = string.Join(", ", result.Errors.Select(e => e.Description));
+            _logger.LogWarning("Password reset failed for {Email}: {Errors}", email, errors1);
+            await _authLogTableService.LogLoginAttemptAsync(email, "ResetPassword_Failed", ipAddress);
+            return BadRequest(new { meta = new { code = 0, message = "Password reset failed.", errors1 } });
         }
         // Generate Auth and Refresh Tokens
-        var authToken = _tokenService.GenerateAuthToken(user.Id, user.UserName);
+        var authToken = _tokenService.GenerateAuthToken(foundUser.Id, foundUser.UserName);
         var refreshToken = _tokenService.GenerateRefreshToken();
         // Store Refresh Token in Database
-        await _tokenService.StoreRefreshTokenAsync(user.Id, refreshToken);
+        await _tokenService.StoreRefreshTokenAsync(foundUser.Id, refreshToken);
         // Log password reset success
-        await _authLogTableService.LogPasswordResetRequestAsync(request.Email, ipAddress);
-        _logger.LogInformation("Password reset successful for {Email}", request.Email);
+        await _authLogTableService.LogPasswordResetRequestAsync(email, ipAddress);
+        _logger.LogInformation("Password reset successful for {Email}", email);
         return Ok(new { meta = new { code = 1, message = "Your password has been reset successfully." }, data = new { authtoken = authToken, RefreshToken = refreshToken } });
     }
     [HttpPost("logout")]

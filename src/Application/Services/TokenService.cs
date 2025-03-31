@@ -15,7 +15,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Ecos.Application.Services
 {
-    public class TokenService
+    public class TokenService : ITokenService
     {
         private readonly string _key;
         private readonly string _issuer;
@@ -32,7 +32,7 @@ namespace Ecos.Application.Services
 
         public string GenerateAuthToken(string userId, string username)
         {
-            var expirationTime = DateTime.UtcNow.AddMinutes(1); // Token expires in 1 minute
+            var expirationTime = DateTime.UtcNow.AddMinutes(15); // Token expires in 1 minute
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
             var tokenDescriptor = new SecurityTokenDescriptor
