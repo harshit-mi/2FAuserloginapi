@@ -15,6 +15,7 @@ namespace Ecos.Application.DTOs.Request
         public string ResetToken { get; init; }
         [Required]
         [MinLength(8, ErrorMessage = "Password must be at least 8 characters long.")]
+        [StringLength(20, ErrorMessage = "Password must be at most 20 characters.")]
         [DefaultValue("string")]
         [RegularExpression(@"^(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$",
 ErrorMessage = "Password must contain at least one uppercase letter, one number, and one special character.")]
