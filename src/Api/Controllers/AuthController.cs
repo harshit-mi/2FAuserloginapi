@@ -176,8 +176,8 @@ public class AuthController : ApiControllerBase
         // Generate reset token
         string token = await _userManager.GeneratePasswordResetTokenAsync(user);
         // Create reset URL with token - typically this would be a frontend URL
-        string encodedToken = HttpUtility.UrlEncode(token);
-        string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={encodedToken}";
+        string encodedToken = WebUtility.UrlEncode(token);
+        string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={HttpUtility.UrlEncode(encodedToken)}";
         ForgotPasswordViewModel obj = new ForgotPasswordViewModel();
         obj.ResetUrl = resetUrl;
         // Send email with reset link
