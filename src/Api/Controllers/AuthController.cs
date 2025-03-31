@@ -10,6 +10,7 @@ using Ecos.Api.Emails.Templates.Models;
 using Ecos.Application.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
+using System.Web;
 
 namespace Ecos.Api.Controllers;
 
@@ -175,7 +176,7 @@ public class AuthController : ApiControllerBase
         // Generate reset token
         string token = await _userManager.GeneratePasswordResetTokenAsync(user);
         // Create reset URL with token - typically this would be a frontend URL
-        string encodedToken = WebUtility.UrlEncode(token);
+        string encodedToken = HttpUtility.UrlEncode(token);
         string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={encodedToken}";
         ForgotPasswordViewModel obj = new ForgotPasswordViewModel();
         obj.ResetUrl = resetUrl;
@@ -187,6 +188,7 @@ public class AuthController : ApiControllerBase
         _logger.LogInformation("Password reset email sent for {Email}", request.Email);
         return Ok(new { meta = new { code = 1, message = "If your email exists in our system, you will receive a password reset link." } });
     }
+
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
