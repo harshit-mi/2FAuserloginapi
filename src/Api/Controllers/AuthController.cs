@@ -157,7 +157,7 @@ public class AuthController : ApiControllerBase
         await _authLogTableService.LogLoginAttemptAsync(request.Email, "Success", ipAddress);
         
         _logger.LogInformation("User {Email} logged in successfully", request.Email);
-        return Ok(new { meta = new { code = 1, message = "Login successful" }, data = new { authtoken = token, RefreshToken = refreshToken } });
+        return Ok(new { meta = new { code = 1, message = "Login successful" }, data = new { userName = user.UserName, email = user.Email, authtoken = token, RefreshToken = refreshToken } });
     }
 
     [HttpPost("forgot-password")]
