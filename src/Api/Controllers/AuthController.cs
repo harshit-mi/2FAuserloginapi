@@ -324,22 +324,35 @@ public class AuthController : ApiControllerBase
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
-        var newAuthToken = await _tokenService.RefreshAuthTokenAsync(request.AuthToken, request.RefreshToken);
-        if (newAuthToken == null)
+        // Extract token from the "Authorization" header
+        var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
+        {
+            return Unauthorized(new { meta = new { code = 0, message = "Authorization header is missing or invalid." } });
+        }
+        var authToken = authHeader.Substring("Bearer ".Length).Trim(); // Extract token value
+        var (newAuthToken, newRefreshToken) = await _tokenService.RefreshAuthTokenAsync(authToken, request.RefreshToken);
+        if (newAuthToken == null || newRefreshToken == null)
         {
             return Unauthorized(new { meta = new { code = 0, message = "Invalid refresh token or expired session." } });
         }
         return Ok(new
         {
             meta = new { code = 1, message = "Token refreshed successfully." },
-            data = new { authToken = newAuthToken, refreshToken = request.RefreshToken }
+            data = new { authToken = newAuthToken, refreshToken = newRefreshToken }
         });
     }
-
     [HttpPost("verify-token")]
-    public IActionResult VerifyToken([FromBody] TokenVerificationRequest request)
+    public IActionResult VerifyToken()
     {
-        var isValid = _tokenService.VerifyAuthToken(request.AuthToken);
+        // Extract token from the "Authorization" header
+        var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
+        {
+            return Unauthorized(new { meta = new { code = 0, message = "Authorization header is missing or invalid." } });
+        }
+        var authToken = authHeader.Substring("Bearer ".Length).Trim(); // Extract token value
+        var isValid = _tokenService.VerifyAuthToken(authToken);
         if (!isValid)
         {
             return Unauthorized(new { meta = new { code = 0, message = "Invalid or expired token." } });
