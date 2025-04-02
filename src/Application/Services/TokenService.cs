@@ -10,6 +10,7 @@ using Ecos.Application.DTOs.Request;
 using Ecos.Domain.Entities;
 using Ecos.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 
@@ -21,13 +22,15 @@ namespace Ecos.Application.Services
         private readonly string _issuer;
         private readonly string _audience;
         private readonly DataContext _context;
+        private readonly IMemoryCache _cache;
 
-        public TokenService(IConfiguration configuration, DataContext context)
+        public TokenService(IConfiguration configuration, DataContext context, IMemoryCache cache)
         {
             _key = configuration["Jwt:Key"];
             _issuer = configuration["Jwt:Issuer"];
             _audience = configuration["Jwt:Audience"];
             _context = context;
+            _cache = cache;
         }
 
         public string GenerateAuthToken(string userId, string username)
@@ -53,7 +56,7 @@ namespace Ecos.Application.Services
             };
             var tokenHandler = new JwtSecurityTokenHandler();
             var token = tokenHandler.CreateToken(tokenDescriptor);
-            return tokenHandler.WriteToken(token); 
+            return tokenHandler.WriteToken(token);
         }
         public string GenerateRefreshToken()
         {
@@ -172,6 +175,44 @@ namespace Ecos.Application.Services
             {
                 return false; // Token is invalid or expired
             }
+        }
+
+        public async Task BlacklistTokenAsync(string token, string userId)
+        {
+            var expiration = GetTokenExpiration(token);
+            if (expiration > DateTime.UtcNow)
+            {
+                _cache.Set(token, userId, expiration - DateTime.UtcNow);
+            }
+        }
+        public bool IsTokenBlacklisted(string token)
+        {
+            return _cache.TryGetValue(token, out _);
+        }
+        public string GenerateExpiredToken(string userId)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.ASCII.GetBytes(_key);
+            var now = DateTime.UtcNow;
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+            {
+new Claim(ClaimTypes.NameIdentifier, userId)
+}),
+                NotBefore = now.AddSeconds(-20), // Set NotBefore in the past
+                IssuedAt = now.AddSeconds(-20), // Set IssuedAt in the past
+                Expires = now.AddSeconds(-10), // Set Expires before NotBefore but not too early
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
+        private DateTime GetTokenExpiration(string token)
+        {
+            var handler = new JwtSecurityTokenHandler();
+            var jsonToken = handler.ReadToken(token) as JwtSecurityToken;
+            return jsonToken?.ValidTo ?? DateTime.UtcNow;
         }
     }
 }

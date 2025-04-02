@@ -31,6 +31,8 @@ builder.Services.AddScoped<IDataContext>(provider =>
     provider.GetRequiredService<DataContext>());
 
 builder.Services.AddControllers();
+builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddMemoryCache();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -38,10 +40,10 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
+    // Configure token validation parameters
     var key = builder.Configuration["Jwt:Key"];
     var issuer = builder.Configuration["Jwt:Issuer"];
     var audience = builder.Configuration["Jwt:Audience"];
-
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -50,6 +52,31 @@ builder.Services.AddAuthentication(options =>
         ValidIssuer = issuer,
         ValidAudience = audience,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key))
+    };
+    // Add events to check for blacklisted tokens
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async context =>
+        {
+            var tokenService = context.HttpContext.RequestServices.GetRequiredService<ITokenService>();
+            var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
+            if (!string.IsNullOrEmpty(token) && tokenService.IsTokenBlacklisted(token))
+            {
+                context.Fail("Token has been revoked");
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+                var response = new
+                {
+                    meta = new
+                    {
+                        code = 0,
+                        message = new List<string> { "Token is Expired and revoked." }
+                    }
+                };
+                await context.Response.WriteAsJsonAsync(response);
+                await context.Response.CompleteAsync(); // Ensure response is written
+            }
+        }
     };
 });
 builder.Services.AddSwaggerGen(options =>
@@ -78,7 +105,7 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 });
-builder.Services.AddScoped<ITokenService, TokenService>();
+
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>

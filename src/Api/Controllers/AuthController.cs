@@ -11,6 +11,7 @@ using Ecos.Application.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Web;
+using System.Security.Claims;
 
 namespace Ecos.Api.Controllers;
 
@@ -235,13 +236,30 @@ public class AuthController : ApiControllerBase
         // Log password reset success
         await _authLogTableService.LogPasswordResetRequestAsync(email, ipAddress);
         _logger.LogInformation("Password reset successful for {Email}", email);
-        return Ok(new { meta = new { code = 1, message = "Your password has been reset successfully." }, data = new { authtoken = authToken, RefreshToken = refreshToken } });
+        return Ok(new { meta = new { code = 1, message = "Your password has been reset successfully." }, data = new { userName = foundUser.UserName, email = foundUser.Email, authtoken = authToken, RefreshToken = refreshToken } });
     }
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new { meta = new { code = 0, message = "Invalid user session" } });
+        }
+        var authToken = Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
+        if (string.IsNullOrEmpty(authToken))
+        {
+            return BadRequest(new { meta = new { code = 0, message = "Token is missing" } });
+        }
+        // Store the token in a blacklist
+        await _tokenService.BlacklistTokenAsync(authToken, userId);
+        // Issue an expired token
+        var expiredToken = _tokenService.GenerateExpiredToken(userId);
+        // Revoke the refresh token
+        await _tokenService.RevokeRefreshTokenAsync(userId);
+        // Sign out user (for Identity-based authentication)
         await _signInManager.SignOutAsync();
-        return Ok(new { message = "Logged out successfully" });
+        return Ok(new { meta = new { code = 1, message = "Logged out successfully" } });
     }
 
     [HttpPost("resend-code")]
