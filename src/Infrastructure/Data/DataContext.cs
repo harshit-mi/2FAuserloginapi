@@ -12,7 +12,8 @@ public class DataContext(DbContextOptions<DataContext> options)
     public DbSet<User> ApplicationUsers { get; set; }
 
     public DbSet<RefreshToken> RefreshTokens { get; set; }
-
+    public DbSet<Folder> Folders { get; set; } = null!;
+    public DbSet<FileMetadata> Files { get; set; } = null!;
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

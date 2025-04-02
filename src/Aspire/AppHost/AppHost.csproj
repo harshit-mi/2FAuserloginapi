@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <Sdk Name="Aspire.AppHost.Sdk" Version="9.1.0" />
 
@@ -16,6 +16,7 @@
     <ItemGroup>
         <PackageReference Include="Aspire.Hosting.AppHost" Version="9.1.0" />
         <PackageReference Include="Aspire.Hosting.Redis" Version="8.2.2" />
+        <PackageReference Include="Azure.Storage.Blobs" Version="12.24.0" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.14" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.14">
           <PrivateAssets>all</PrivateAssets>

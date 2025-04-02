@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Models;
+using Azure.Storage.Blobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +23,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
     });
 });
 
+
 builder.Services.AddApiServices(builder.Configuration);
 
 builder.Services.AddDbContext<DataContext>(options =>
@@ -31,8 +33,9 @@ builder.Services.AddScoped<IDataContext>(provider =>
     provider.GetRequiredService<DataContext>());
 
 builder.Services.AddControllers();
-builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IFileManagerService, FileManagerService>();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -70,14 +73,58 @@ builder.Services.AddAuthentication(options =>
                     meta = new
                     {
                         code = 0,
-                        message = new List<string> { "Token is Expired and revoked." }
+                        message = new List<string> { "Token has been revoked." }
                     }
                 };
                 await context.Response.WriteAsJsonAsync(response);
                 await context.Response.CompleteAsync(); // Ensure response is written
             }
+        },
+        OnChallenge = async context =>
+        {
+            if (!context.Response.HasStarted)
+            {
+                context.HandleResponse(); // Prevents default challenge response
+                var response = new
+                {
+                    meta = new
+                    {
+                        code = 0,
+                        message = "Unauthorized access. Please provide a valid token."
+                    }
+                };
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsJsonAsync(response);
+            }
+        },
+        OnForbidden = async context =>
+        {
+            var response = new
+            {
+                meta = new
+                {
+                    code = 0,
+                    message = "Forbidden: You do not have permission to access this resource."
+                }
+            };
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(response);
         }
     };
+});
+builder.Services.AddSingleton(x =>
+{
+    var configuration = x.GetRequiredService<IConfiguration>();
+    var connectionString = configuration["Azure:StorageAccount:ConnectionString"];
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException("Azure Storage connection string is not configured.");
+    }
+    // Create BlobClientOptions with a specific API version
+    var options = new BlobClientOptions(BlobClientOptions.ServiceVersion.V2021_06_08);
+    return new BlobServiceClient(connectionString, options);
 });
 builder.Services.AddSwaggerGen(options =>
 {
@@ -125,6 +172,7 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
         return new BadRequestObjectResult(response);
     };
 });
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
@@ -135,7 +183,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-app.UseCors("AllowAll"); // Apply CORS policy
+app.UseCors("AllowAll");
 
 if (app.Environment.IsDevelopment())
 {
@@ -151,13 +199,13 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<DataContext>();
-    dbContext.Database.Migrate();
+//using (var scope = app.Services.CreateScope())
+//{
+//    var dbContext = scope.ServiceProvider.GetRequiredService<DataContext>();
+//    dbContext.Database.Migrate();
 
-    // Seed roles and admin users
-    await UserSeed.SeedRolesAndAdminsAsync(app.Services);
-}
+//    // Seed roles and admin users
+//    await UserSeed.SeedRolesAndAdminsAsync(app.Services);
+//}
 
 app.Run();

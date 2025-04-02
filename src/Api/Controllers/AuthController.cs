@@ -1,20 +1,20 @@
 ﻿using System.Net;
+using System.Security.Claims;
+using System.Web;
 using Ecos.Api.Controllers.Base;
+using Ecos.Api.Emails.Templates.Models;
 using Ecos.Application.DTOs.Request;
+using Ecos.Application.Services;
 using Ecos.Common.Utils;
 using Ecos.Domain.Entities;
 using Ecos.Infrastructure.Services.Azure.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Ecos.Api.Emails.Templates.Models;
-using Ecos.Application.Services;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
-using System.Web;
-using System.Security.Claims;
 
 namespace Ecos.Api.Controllers;
 
+[Authorize]
 [Route("[controller]")]
 public class AuthController : ApiControllerBase
 {
@@ -41,6 +41,7 @@ public class AuthController : ApiControllerBase
         _tokenService = tokenService;
     }
 
+    [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
@@ -94,8 +95,8 @@ public class AuthController : ApiControllerBase
         return Ok(new { meta = new { code = 1, message = "Verification code sent to your email" } });
     }
 
-    
 
+    [AllowAnonymous]
     [HttpPost("verify")]
     public async Task<IActionResult> VerifyCode([FromBody] VerifyCodeRequest request)
     {

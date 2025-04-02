@@ -17,9 +17,11 @@
 
     <ItemGroup>
       <Folder Include="DTOs\Response\" />
+      <Folder Include="DTOs\Response\" />
     </ItemGroup>
 
     <ItemGroup>
+      <PackageReference Include="Azure.Storage.Blobs" Version="12.24.0" />
       <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.14" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.14">
         <PrivateAssets>all</PrivateAssets>
