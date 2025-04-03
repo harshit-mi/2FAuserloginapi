@@ -12,6 +12,8 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Models;
 using Azure.Storage.Blobs;
+using Microsoft.AspNetCore.Http.Features;
+using Ecos.Application.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +38,9 @@ builder.Services.AddControllers();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IFileManagerService, FileManagerService>();
+builder.Services.AddScoped<LoggingService>(); // Scoped service
+builder.Services.AddSingleton<IServiceScopeFactory>(sp => sp.GetRequiredService<IServiceScopeFactory>());
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -180,7 +185,15 @@ builder.Services.AddCors(options =>
                         .AllowAnyMethod()
                         .AllowAnyHeader());
 });
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = null; // No limit on request body size
+});
 
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = long.MaxValue; // No limit on multipart form data
+});
 var app = builder.Build();
 
 app.UseCors("AllowAll");
@@ -190,6 +203,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Ecos API v1"));
 }
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseCors(ApiConstants.DefaultCorsPolicy);
 app.UseHttpsRedirection();
@@ -199,13 +213,14 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-//using (var scope = app.Services.CreateScope())
-//{
-//    var dbContext = scope.ServiceProvider.GetRequiredService<DataContext>();
-//    dbContext.Database.Migrate();
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<DataContext>();
+    dbContext.Database.Migrate();
 
-//    // Seed roles and admin users
-//    await UserSeed.SeedRolesAndAdminsAsync(app.Services);
-//}
+    // Seed roles and admin users
+    await UserSeed.SeedRolesAndAdminsAsync(app.Services);
+    await FolderSeed.SeedRootFolderAsync(app.Services);
+}
 
 app.Run();
