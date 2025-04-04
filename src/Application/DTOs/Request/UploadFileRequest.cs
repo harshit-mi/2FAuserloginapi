@@ -10,6 +10,6 @@ namespace Ecos.Application.DTOs.Request
     public class UploadFileRequest
     {
         public List<IFormFile> Files { get; set; } = new();
-        public Guid FolderId { get; set; }
+        public Guid? FolderId { get; set; }
     }
 }

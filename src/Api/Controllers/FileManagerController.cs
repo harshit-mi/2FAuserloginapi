@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using Ecos.Api.Controllers.Base;
 using Ecos.Application.DTOs.Request;
+using Ecos.Application.DTOs.Response;
 using Ecos.Application.Services;
 using Ecos.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
@@ -14,9 +15,9 @@ namespace Ecos.Api.Controllers
     public class FileManagerController : ApiControllerBase
     {
         private readonly IFileManagerService _fileManagerService;
-        private readonly LoggingService _loggingService;
+        private readonly ILoggingService _loggingService;
 
-        public FileManagerController(IFileManagerService fileManagerService, LoggingService loggingService)
+        public FileManagerController(IFileManagerService fileManagerService, ILoggingService loggingService)
         {
             _fileManagerService = fileManagerService;
             _loggingService = loggingService;
@@ -48,7 +49,7 @@ namespace Ecos.Api.Controllers
         }
 
         [HttpPost("create-folder")]
-        public async Task<IActionResult> CreateFolder([FromBody] CreateFolderRequest request)
+        public async Task<IActionResult> CreateFolder([FromForm] CreateFolderRequest request)
         {
             var userId = GetUserIdFromToken();
 
@@ -56,6 +57,19 @@ namespace Ecos.Api.Controllers
             {
                 await _loggingService.LogErrorAsync("Unauthorized file upload attempt", "Invalid token", "Anonymous");
                 return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
+            }
+            if (request == null || string.IsNullOrWhiteSpace(request.Name))
+            {
+                return BadRequest(new { meta = new { code = 0, message = "Invalid request, Folder name is required." } });
+            }
+            //if (request != null && !request.ParentFolderId.HasValue)
+            //{
+            //    return BadRequest(new { meta = new { code = 0, message = "Please provide Parent folder id" } });
+            //}
+            // If ParentFolderId is provided, it should not be empty
+            if (request.ParentFolderId.HasValue && request.ParentFolderId.Value == Guid.Empty)
+            {
+                return BadRequest(new { meta = new { code = 0, message = "Invalid Parent Folder ID." } });
             }
             var response = await _fileManagerService.CreateFolderAsync(request , userId.Value);
             await _loggingService.LogAsync("CreateFolder", TrackedEntity.Folder, response?.Id, null, response, userId.ToString());
@@ -104,6 +118,24 @@ namespace Ecos.Api.Controllers
                 });
             }
 
+            // Determine the target folder (assign root folder if none is provided)
+            var folderId = request.FolderId;
+            if (folderId == null || folderId == Guid.Empty)
+            {
+                var rootFolders = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value) ?? new List<FolderResponse>(); ;
+
+                // If no root folder exists, the system creates one automatically
+                if (!rootFolders.Any())
+                {
+                    var rootFolder = await _fileManagerService.CreateRootFolderAsync(userId.Value);
+                    folderId = rootFolder.Id;
+                }
+                else
+                {
+                    folderId = rootFolders.First().Id; // Use the existing root folder
+                }
+            }
+            request.FolderId = folderId;
             var (uploadedFiles, failedFiles) = await _fileManagerService.UploadFilesAsync(request , userId.Value);
             await _loggingService.LogAsync("UploadFiles", TrackedEntity.File, null, null, new { uploadedFiles, failedFiles }, userId.ToString());
             return Ok(new
@@ -116,32 +148,44 @@ namespace Ecos.Api.Controllers
                 } 
             });
         }
-
-
-        [HttpGet("Get-folders")]
-        public async Task<IActionResult> GetAllFoldersWithFiles()
+        [HttpGet("folders")]
+        public async Task<IActionResult> GetFolders([FromQuery] Guid? folderId)
         {
             var userId = GetUserIdFromToken();
-
             if (userId == null)
             {
-                await _loggingService.LogErrorAsync("Unauthorized file upload attempt", "Invalid token", "Anonymous");
+                await _loggingService.LogErrorAsync("Unauthorized folder access attempt", "Invalid token", "Anonymous");
                 return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
             }
 
-            var response = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value);
-            await _loggingService.LogAsync("GetAllFolders", TrackedEntity.Folder, null, null, null, userId.ToString());
-            return Ok(new { meta = new { code = 1, message = "Folders retrieved successfully" }, data = response });
-        }
+            FolderResponse? response;
 
-        [HttpGet("folder/{folderId}")]
-        public async Task<IActionResult> GetFolderById(Guid folderId)
-        {
-            var response = await _fileManagerService.GetFolderByIdAsync(folderId);
-            await _loggingService.LogAsync("GetFolderById", TrackedEntity.Folder, folderId, null, response, GetUserIdFromToken()?.ToString());
-            return response != null
-                ? Ok(new { meta = new { code = 1, message = "Folder retrieved successfully" }, data = response })
-                : NotFound(new { meta = new { code = 0, message = "Folder not found" } });
+            if (folderId.HasValue)
+            {
+                // Fetch specific folder
+                response = await _fileManagerService.GetFolderByIdAsync(folderId.Value);
+                if (response == null)
+                {
+                    return NotFound(new { meta = new { code = 0, message = "Folder not found" } });
+                }
+            }
+            else
+            {
+                // Fetch root folders
+                var rootFolders = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value);
+
+                // If no root folder exists, create one
+                if (!rootFolders.Any())
+                {
+                    var rootFolder = await _fileManagerService.CreateRootFolderAsync(userId.Value);
+                    rootFolders = new List<FolderResponse> { rootFolder };
+                }
+
+                return Ok(new { meta = new { code = 1, message = "Folders retrieved successfully" }, data = rootFolders });
+            }
+
+            await _loggingService.LogAsync("GetFolders", TrackedEntity.Folder, folderId, null, null, userId.ToString());
+            return Ok(new { meta = new { code = 1, message = "Folder retrieved successfully" }, data = response });
         }
 
         [HttpGet("file/{fileId}")]

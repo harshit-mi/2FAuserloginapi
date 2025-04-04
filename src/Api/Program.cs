@@ -38,7 +38,7 @@ builder.Services.AddControllers();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IFileManagerService, FileManagerService>();
-builder.Services.AddScoped<LoggingService>(); // Scoped service
+builder.Services.AddScoped<ILoggingService, LoggingService>(); // Scoped service
 builder.Services.AddSingleton<IServiceScopeFactory>(sp => sp.GetRequiredService<IServiceScopeFactory>());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>
@@ -64,6 +64,12 @@ builder.Services.AddAuthentication(options =>
     // Add events to check for blacklisted tokens
     options.Events = new JwtBearerEvents
     {
+        OnAuthenticationFailed = context =>
+        {
+            // Store the exception in HttpContext for later use in OnChallenge
+            context.HttpContext.Items["AuthException"] = context.Exception;
+            return Task.CompletedTask;
+        },
         OnTokenValidated = async context =>
         {
             var tokenService = context.HttpContext.RequestServices.GetRequiredService<ITokenService>();
@@ -71,8 +77,10 @@ builder.Services.AddAuthentication(options =>
             if (!string.IsNullOrEmpty(token) && tokenService.IsTokenBlacklisted(token))
             {
                 context.Fail("Token has been revoked");
+
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.ContentType = "application/json";
+
                 var response = new
                 {
                     meta = new
@@ -81,16 +89,47 @@ builder.Services.AddAuthentication(options =>
                         message = new List<string> { "Token has been revoked." }
                     }
                 };
+
                 await context.Response.WriteAsJsonAsync(response);
                 await context.Response.CompleteAsync(); // Ensure response is written
             }
         },
         OnChallenge = async context =>
         {
-            if (!context.Response.HasStarted)
+            var path = context.HttpContext.Request.Path.Value;
+
+            if (path != null && path.Contains("/auth/refresh-token", StringComparison.OrdinalIgnoreCase))
             {
-                context.HandleResponse(); // Prevents default challenge response
-                var response = new
+                // Skip handling here — let the controller handle it
+                return;
+            }
+
+            context.HandleResponse(); // Prevent default response
+
+            var authException = context.HttpContext.Items["AuthException"] as Exception;
+
+            if (authException is SecurityTokenExpiredException)
+            {
+                context.Response.StatusCode = 498;
+                context.Response.ContentType = "application/json";
+
+                var expiredResponse = new
+                {
+                    meta = new
+                    {
+                        code = 0,
+                        message = "Token has expired. Please log in again."
+                    }
+                };
+
+                await context.Response.WriteAsJsonAsync(expiredResponse);
+            }
+            else
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                context.Response.ContentType = "application/json";
+
+                var unauthorizedResponse = new
                 {
                     meta = new
                     {
@@ -98,9 +137,8 @@ builder.Services.AddAuthentication(options =>
                         message = "Unauthorized access. Please provide a valid token."
                     }
                 };
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(response);
+
+                await context.Response.WriteAsJsonAsync(unauthorizedResponse);
             }
         },
         OnForbidden = async context =>
@@ -113,6 +151,7 @@ builder.Services.AddAuthentication(options =>
                     message = "Forbidden: You do not have permission to access this resource."
                 }
             };
+
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsJsonAsync(response);

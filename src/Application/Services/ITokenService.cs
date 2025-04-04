@@ -13,7 +13,7 @@ namespace Ecos.Application.Services
         Task StoreRefreshTokenAsync(string userId, string refreshToken);
         Task<bool> ValidateRefreshTokenAsync(string userId, string refreshToken);
         Task RevokeRefreshTokenAsync(string userId);
-        Task<(string? newAuthToken, string? newRefreshToken)> RefreshAuthTokenAsync(string authToken, string refreshToken);
+        Task<string> RefreshAuthTokenAsync(string authToken, string refreshToken);
         bool VerifyAuthToken(string token);
         Task BlacklistTokenAsync(string token, string userId);
         string GenerateExpiredToken(string userId);

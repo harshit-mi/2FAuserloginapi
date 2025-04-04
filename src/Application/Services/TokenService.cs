@@ -99,10 +99,11 @@ namespace Ecos.Application.Services
             }
         }
 
-        public async Task<(string? newAuthToken, string? newRefreshToken)> RefreshAuthTokenAsync(string authToken, string refreshToken)
+        public async Task<string> RefreshAuthTokenAsync(string authToken, string refreshToken)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_key);
+
             try
             {
                 var principal = tokenHandler.ValidateToken(authToken, new TokenValidationParameters
@@ -113,45 +114,37 @@ namespace Ecos.Application.Services
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(key)
                 }, out SecurityToken validatedToken);
+
                 if (principal == null || !principal.Claims.Any())
                 {
                     Console.WriteLine("No claims found in token.");
-                    return (null, null);
+                    return null;
                 }
+
                 // Extract User ID, Username, and Email
                 var userId = principal.Claims.FirstOrDefault(c =>
-                c.Type == ClaimTypes.NameIdentifier ||
-                c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+                                c.Type == ClaimTypes.NameIdentifier ||
+                                c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+
                 var username = principal.Claims.FirstOrDefault(c =>
-                c.Type == ClaimTypes.Name ||
-                c.Type == JwtRegisteredClaimNames.UniqueName)?.Value;
+                                c.Type == ClaimTypes.Name ||
+                                c.Type == JwtRegisteredClaimNames.UniqueName)?.Value;
+
                 if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(username))
                 {
                     Console.WriteLine("User ID or Username is null!");
-                    return (null, null);
+                    return null;
                 }
-                var storedToken = await _context.RefreshTokens
-                .Where(t => t.UserId == userId && t.Token == refreshToken && !t.IsRevoked)
-                .FirstOrDefaultAsync();
-                if (storedToken == null || storedToken.ExpiryDate <= DateTime.UtcNow)
-                {
-                    return (null, null);
-                }
-                // Invalidate the old refresh token
-                storedToken.IsRevoked = true;
-                _context.RefreshTokens.Update(storedToken);
-                await _context.SaveChangesAsync();
-                // Generate new refresh token
-                var newRefreshToken = GenerateRefreshToken();
-                await StoreRefreshTokenAsync(userId, newRefreshToken);
+
                 // Generate new auth token (JWT)
                 var newAuthToken = GenerateAuthToken(userId, username);
-                return (newAuthToken, newRefreshToken);
+
+                return newAuthToken;
             }
             catch (SecurityTokenException ex)
             {
                 Console.WriteLine($"Token validation failed: {ex.Message}");
-                return (null, null);
+                return null;
             }
         }
         public bool VerifyAuthToken(string token)

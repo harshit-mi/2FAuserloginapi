@@ -1,11 +1,18 @@
-﻿using Azure.Storage.Blobs;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Ecos.Application.DTOs.Request;
 using Ecos.Application.DTOs.Response;
 using Ecos.Domain.Entities;
 using Ecos.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Ecos.Application.Services
 {
@@ -31,7 +38,22 @@ namespace Ecos.Application.Services
                 parentFolder = await _context.Folders.FindAsync(request.ParentFolderId.Value);
                 if (parentFolder == null)
                 {
-                    return null; // Parent folder does not exist
+                    return null; 
+                }
+            }
+            else
+            {
+                var rootFolders = await GetAllFoldersWithFilesAsync(userId);
+
+                // If no root folder exists, the system creates one automatically
+                if (!rootFolders.Any())
+                {
+                    var rootFolder = await CreateRootFolderAsync(userId);
+                    parentFolder = await _context.Folders.FindAsync(rootFolder.Id);
+                }
+                else
+                {
+                    parentFolder = await _context.Folders.FindAsync(rootFolders.First().Id); // Use the existing root folder
                 }
             }
 
@@ -40,7 +62,7 @@ namespace Ecos.Application.Services
             {
                 Id = Guid.NewGuid(),  // Assign a new GUID
                 Name = request.Name,
-                ParentFolderId = request.ParentFolderId, // Null means it's a root folder
+                ParentFolderId = parentFolder.Id,
                 UserId = userId, // Associate folder with the user
                 CreatedAt = DateTime.UtcNow
             };
@@ -83,7 +105,7 @@ namespace Ecos.Application.Services
                         Size = file.Length,
                         BlobStorageUrl = blob.Uri.ToString(),
                         UserId= userId,
-                        FolderId = request.FolderId
+                        FolderId = request.FolderId ?? Guid.NewGuid(),
                     };
 
                     await _context.Files.AddAsync(fileMetadata);
@@ -98,7 +120,23 @@ namespace Ecos.Application.Services
             await _context.SaveChangesAsync();
             return (uploadedFiles, failedFiles);
         }
+        
+        public async Task<FolderResponse> CreateRootFolderAsync(Guid userId)
+        {
+            var rootFolder = new Folder
+            {
+                Id = Guid.NewGuid(),
+                Name = "Root",
+                ParentFolderId = null,
+                UserId = userId,
+                CreatedAt = DateTime.UtcNow
+            };
 
+            await _context.Folders.AddAsync(rootFolder);
+            await _context.SaveChangesAsync();
+
+            return new FolderResponse(rootFolder.Id, rootFolder.Name, new List<FileResponse>(), new List<FolderResponse>());
+        }
 
         public async Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId)
         {

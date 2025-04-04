@@ -340,25 +340,30 @@ public class AuthController : ApiControllerBase
         return Ok(new { meta = new { code = 1, message = "Verification code sent to your email" } });
     }
 
+    [AllowAnonymous]
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
         // Extract token from the "Authorization" header
         var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+
         if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
         {
             return Unauthorized(new { meta = new { code = 0, message = "Authorization header is missing or invalid." } });
         }
+
         var authToken = authHeader.Substring("Bearer ".Length).Trim(); // Extract token value
-        var (newAuthToken, newRefreshToken) = await _tokenService.RefreshAuthTokenAsync(authToken, request.RefreshToken);
-        if (newAuthToken == null || newRefreshToken == null)
+        string newAuthToken = await _tokenService.RefreshAuthTokenAsync(authToken, request.RefreshToken);
+
+        if (newAuthToken == null)
         {
             return Unauthorized(new { meta = new { code = 0, message = "Invalid refresh token or expired session." } });
         }
+
         return Ok(new
         {
             meta = new { code = 1, message = "Token refreshed successfully." },
-            data = new { authToken = newAuthToken, refreshToken = newRefreshToken }
+            data = new { authToken = newAuthToken, refreshToken = request.RefreshToken }
         });
     }
     [HttpPost("verify-token")]
