@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Ecos.Api.Controllers;
 
-[Authorize]
+
 [Route("[controller]")]
 public class AuthController : ApiControllerBase
 {
@@ -41,7 +41,7 @@ public class AuthController : ApiControllerBase
         _tokenService = tokenService;
     }
 
-    [AllowAnonymous]
+    
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
@@ -96,7 +96,7 @@ public class AuthController : ApiControllerBase
     }
 
 
-    [AllowAnonymous]
+    
     [HttpPost("verify")]
     public async Task<IActionResult> VerifyCode([FromBody] VerifyCodeRequest request)
     {
@@ -128,14 +128,6 @@ public class AuthController : ApiControllerBase
             return BadRequest(new { meta = new { code = 0, message = "No verification code found" } });
         }
         
-        // Check expiration
-        if (!DateTime.TryParse(expirationStr, out var expiration) || expiration < DateTime.UtcNow)
-        {
-            _logger.LogWarning("Verification code expired for email: {Email}", request.Email);
-            await _authLogTableService.LogLoginAttemptAsync(request.Email, "ExpiredCode", ipAddress);
-            return BadRequest(new { meta = new { code = 0, message = "No verification code found" } });
-        }
-        
         // Verify code
         if (request.Code != storedCode)
         {
@@ -143,7 +135,13 @@ public class AuthController : ApiControllerBase
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "InvalidCode", ipAddress);
             return BadRequest(new { meta = new { code = 0, message = "Invalid verification code" } });
         }
-        
+        // Check expiration
+        if (!DateTime.TryParse(expirationStr, out var expiration) || expiration < DateTime.UtcNow)
+        {
+            _logger.LogWarning("Verification code expired for email: {Email}", request.Email);
+            await _authLogTableService.LogLoginAttemptAsync(request.Email, "ExpiredCode", ipAddress);
+            return BadRequest(new { meta = new { code = 0, message = "No verification code found" } });
+        }
         // Clear used tokens
         await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCode");
         await _userManager.RemoveAuthenticationTokenAsync(user, "LoginProvider", "VerificationCodeExpires");
@@ -239,6 +237,7 @@ public class AuthController : ApiControllerBase
         _logger.LogInformation("Password reset successful for {Email}", email);
         return Ok(new { meta = new { code = 1, message = "Your password has been reset successfully." }, data = new { userName = foundUser.UserName, email = foundUser.Email, authtoken = authToken, RefreshToken = refreshToken } });
     }
+    [Authorize]
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
@@ -340,7 +339,7 @@ public class AuthController : ApiControllerBase
         return Ok(new { meta = new { code = 1, message = "Verification code sent to your email" } });
     }
 
-    [AllowAnonymous]
+    
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
@@ -366,6 +365,7 @@ public class AuthController : ApiControllerBase
             data = new { authToken = newAuthToken, refreshToken = request.RefreshToken }
         });
     }
+    [Authorize]
     [HttpPost("verify-token")]
     public IActionResult VerifyToken()
     {

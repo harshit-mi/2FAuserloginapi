@@ -259,7 +259,7 @@ using (var scope = app.Services.CreateScope())
 
     // Seed roles and admin users
     await UserSeed.SeedRolesAndAdminsAsync(app.Services);
-    await FolderSeed.SeedRootFolderAsync(app.Services);
+    
 }
 
 app.Run();
