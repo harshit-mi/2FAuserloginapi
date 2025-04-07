@@ -15,11 +15,14 @@ namespace Ecos.Application.DTOs.Response
 
         public string Extension => Path.GetExtension(Name)?.ToLowerInvariant();
 
-        public FileResponse(Guid id, string name, string url)
+        public List<FolderPathItem> path { get; set; }
+
+        public FileResponse(Guid id, string name, string url, List<FolderPathItem> Path)
         {
             Id = id;
             Name = name;
             Url = url;
+            path = Path;
         }
     }
 }

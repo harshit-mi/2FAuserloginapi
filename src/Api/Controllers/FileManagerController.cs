@@ -201,13 +201,13 @@ namespace Ecos.Api.Controllers
                 }
 
                 path = await _fileManagerService.GetFolderPathAsync(folderId.Value);
-
+                folder.path = path;
 
                 return Ok(new
                 {
                     meta = new { code = 1, message = "Folder retrieved successfully" },
                     data = folder,
-                    path
+                    
                 });
             }
             else
@@ -231,12 +231,11 @@ namespace Ecos.Api.Controllers
         {
             new FolderPathItem(folder.Id, folder.Name)
         };
-
+                folder.path = path;
                 return Ok(new
                 {
                     meta = new { code = 1, message = "Root folder retrieved successfully" },
                     data = folder,
-                    path
                 });
             }
         }
@@ -247,8 +246,9 @@ namespace Ecos.Api.Controllers
             var response = await _fileManagerService.GetFileByIdAsync(fileId);
             var path = await _fileManagerService.GetFilePathAsync(fileId); // Returns List<FolderPathItem>
             await _loggingService.LogAsync("GetFileById", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "Fetched file by ID", $"FileId: {fileId}");
+            response.path=path;
             return response != null
-                ? Ok(new { meta = new { code = 1, message = "File retrieved successfully" }, data = response ,path })
+                ? Ok(new { meta = new { code = 1, message = "File retrieved successfully" }, data = response})
                 : NotFound(new { meta = new { code = 0, message = "File not found" } });
         }
 

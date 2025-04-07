@@ -74,7 +74,8 @@ namespace Ecos.Application.Services
                 folder.Id,
                 folder.Name,
                 new List<FileResponse>(),
-                new List<FolderResponse>()
+                new List<FolderResponse>(),
+                GetFolderPathAsync(folder.Id).Result
             );
         }
 
@@ -109,7 +110,7 @@ namespace Ecos.Application.Services
                     };
 
                     await _context.Files.AddAsync(fileMetadata);
-                    uploadedFiles.Add(new FileResponse(fileMetadata.Id, fileMetadata.Name, fileMetadata.BlobStorageUrl));
+                    uploadedFiles.Add(new FileResponse(fileMetadata.Id, fileMetadata.Name, fileMetadata.BlobStorageUrl, GetFilePathAsync(fileMetadata.Id).Result));
                 }
                 catch (Exception ex)
                 {
@@ -128,7 +129,7 @@ namespace Ecos.Application.Services
 
             if (existingRoot != null)
             {
-                return new FolderResponse(existingRoot.Id, existingRoot.Name, new List<FileResponse>(), new List<FolderResponse>());
+                return new FolderResponse(existingRoot.Id, existingRoot.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(existingRoot.Id).Result);
             }
 
             var rootFolder = new Folder
@@ -143,7 +144,7 @@ namespace Ecos.Application.Services
             await _context.Folders.AddAsync(rootFolder);
             await _context.SaveChangesAsync();
 
-            return new FolderResponse(rootFolder.Id, rootFolder.Name, new List<FileResponse>(), new List<FolderResponse>());
+            return new FolderResponse(rootFolder.Id, rootFolder.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(rootFolder.Id).Result);
         }
 
         public async Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId)
@@ -163,8 +164,9 @@ namespace Ecos.Application.Services
             return new FolderResponse(
                 folder.Id,
                 folder.Name,
-                folder.Files.Select(file => new FileResponse(file.Id, file.Name, file.BlobStorageUrl)).ToList(),
-                folder.SubFolders.Select(sf => MapFolderToResponse(sf)).ToList() // Recursive mapping
+                folder.Files.Select(file => new FileResponse(file.Id, file.Name, file.BlobStorageUrl, GetFilePathAsync(file.Id).Result)).ToList(),
+                folder.SubFolders.Select(sf => MapFolderToResponse(sf)).ToList(), // Recursive mapping
+                GetFolderPathAsync(folder.Id).Result
             );
         }
 
@@ -201,7 +203,7 @@ namespace Ecos.Application.Services
         public async Task<FileResponse?> GetFileByIdAsync(Guid fileId)
         {
             var file = await _context.Files.FindAsync(fileId);
-            return file != null ? new FileResponse(file.Id, file.Name, file.BlobStorageUrl) : null;
+            return file != null ? new FileResponse(file.Id, file.Name, file.BlobStorageUrl,GetFilePathAsync(file.Id).Result) : null;
         }
 
         public async Task<(Stream?, string?, string?)> DownloadFileAsync(Guid fileId)
