@@ -12,7 +12,8 @@ namespace Ecos.Domain.Entities
         public Guid Id { get; set; } = Guid.NewGuid(); 
         public string Action { get; set; } 
         public TrackedEntity Entity { get; set; }
-        public Guid? EntityId { get; set; } 
+        public Guid? EntityId { get; set; }
+        public string? Message { get; set; }
         public JsonDocument? OldValue { get; set; }
         public JsonDocument? NewValue { get; set; } 
         public string PerformedBy { get; set; } 

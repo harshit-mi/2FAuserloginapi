@@ -18,5 +18,6 @@ namespace Ecos.Application.Services
         Task BlacklistTokenAsync(string token, string userId);
         string GenerateExpiredToken(string userId);
         bool IsTokenBlacklisted(string token);
+
     }
 }

@@ -6,20 +6,15 @@ using System.Threading.Tasks;
 
 namespace Ecos.Application.DTOs.Response
 {
-    public class FileResponse
+    public class FolderPathItem
     {
         public Guid Id { get; set; }
         public string Name { get; set; }
-        public string Url { get; set; }
-        public string Type => "file";
 
-        public string Extension => Path.GetExtension(Name)?.ToLowerInvariant();
-
-        public FileResponse(Guid id, string name, string url)
+        public FolderPathItem(Guid id, string name)
         {
             Id = id;
             Name = name;
-            Url = url;
         }
     }
 }

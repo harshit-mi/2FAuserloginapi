@@ -14,7 +14,7 @@ namespace Ecos.Domain.Entities
         public Folder? ParentFolder { get; set; }
         public ICollection<Folder> SubFolders { get; set; } = new List<Folder>();
         public ICollection<FileMetadata> Files { get; set; } = new List<FileMetadata>();
-        public Guid UserId { get; set; }
+        public Guid? UserId { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
-using System.Linq;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
-using Ecos.Application.DTOs.Request;
 using Ecos.Domain.Entities;
 using Ecos.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +62,7 @@ namespace Ecos.Application.Services
             }
             return Convert.ToBase64String(randomBytes);
         }
+
         public async Task StoreRefreshTokenAsync(string userId, string refreshToken)
         {
             var token = new RefreshToken
@@ -136,6 +132,15 @@ namespace Ecos.Application.Services
                     return null;
                 }
 
+                var storedToken = await _context.RefreshTokens
+     .Where(t => t.Token == refreshToken && !t.IsRevoked)
+     .FirstOrDefaultAsync();
+
+                if (storedToken == null || storedToken.ExpiryDate < DateTime.UtcNow)
+                {
+                    return null;
+                }
+
                 // Generate new auth token (JWT)
                 var newAuthToken = GenerateAuthToken(userId, username);
 
@@ -178,29 +183,34 @@ namespace Ecos.Application.Services
                 _cache.Set(token, userId, expiration - DateTime.UtcNow);
             }
         }
+
         public bool IsTokenBlacklisted(string token)
         {
             return _cache.TryGetValue(token, out _);
         }
+
         public string GenerateExpiredToken(string userId)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.ASCII.GetBytes(_key);
             var now = DateTime.UtcNow;
+
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]
-            {
-new Claim(ClaimTypes.NameIdentifier, userId)
-}),
+                {
+            new Claim(ClaimTypes.NameIdentifier, userId)
+        }),
                 NotBefore = now.AddSeconds(-20), // Set NotBefore in the past
-                IssuedAt = now.AddSeconds(-20), // Set IssuedAt in the past
-                Expires = now.AddSeconds(-10), // Set Expires before NotBefore but not too early
+                IssuedAt = now.AddSeconds(-20),  // Set IssuedAt in the past
+                Expires = now.AddSeconds(-10),   // Set Expires before NotBefore but not too early
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
             };
+
             var token = tokenHandler.CreateToken(tokenDescriptor);
             return tokenHandler.WriteToken(token);
         }
+
         private DateTime GetTokenExpiration(string token)
         {
             var handler = new JwtSecurityTokenHandler();

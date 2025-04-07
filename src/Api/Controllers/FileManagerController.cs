@@ -1,4 +1,5 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
+using System.IO;
 using System.Security.Claims;
 using Ecos.Api.Controllers.Base;
 using Ecos.Application.DTOs.Request;
@@ -10,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Ecos.Api.Controllers
 {
-    [Route("[controller]")]
+    [Route("file-manager")]
     [Authorize]
     public class FileManagerController : ApiControllerBase
     {
@@ -62,17 +63,19 @@ namespace Ecos.Api.Controllers
             {
                 return BadRequest(new { meta = new { code = 0, message = "Invalid request, Folder name is required." } });
             }
-            //if (request != null && !request.ParentFolderId.HasValue)
-            //{
-            //    return BadRequest(new { meta = new { code = 0, message = "Please provide Parent folder id" } });
-            //}
+            
             // If ParentFolderId is provided, it should not be empty
             if (request.ParentFolderId.HasValue && request.ParentFolderId.Value == Guid.Empty)
             {
                 return BadRequest(new { meta = new { code = 0, message = "Invalid Parent Folder ID." } });
             }
             var response = await _fileManagerService.CreateFolderAsync(request , userId.Value);
-            await _loggingService.LogAsync("CreateFolder", TrackedEntity.Folder, response?.Id, null, response, userId.ToString());
+            await _loggingService.LogAsync(
+    "CreateFolder", TrackedEntity.Folder, response?.Id,
+    null, null, userId.ToString(),
+    "New folder created",
+    $"Name: {request.Name}, ParentId: {request.ParentFolderId}"
+);
             return response != null
                 ? Ok(new { meta = new { code = 1, message = "Folder created successfully" }, data = response })
                 : BadRequest(new { meta = new { code = 0, message = "Failed to create folder, Parent folder not found" } });
@@ -91,8 +94,7 @@ namespace Ecos.Api.Controllers
 
             if (request.Files == null || request.Files.Count == 0)
             {
-                await _loggingService.LogAsync("UploadFiles", TrackedEntity.File, null, null,
-            new { Message = "No files uploaded" }, userId.ToString());
+                await _loggingService.LogAsync("UploadFiles", TrackedEntity.File, null, null, null, userId.ToString(), "No files uploaded", "Request contained zero files");
                 return BadRequest(new { meta = new { code = 0, message = "No files uploaded" } });
             }
 
@@ -101,8 +103,8 @@ namespace Ecos.Api.Controllers
 
             if (oversizedFiles.Any())
             {
-                await _loggingService.LogAsync("UploadFilesFailed", TrackedEntity.File, null, null,
-            new { Reason = "Oversized files", Files = oversizedFiles.ToArray() }, userId.ToString());
+                await _loggingService.LogAsync("UploadFilesFailed", TrackedEntity.File, null, null,null
+            , userId.ToString(), "Request contains Oversized files", $"Oversized Files: {string.Join(", ", oversizedFiles.Select(f => $"{f.FileName} ({(f.Length / (1024 * 1024)):F2} MB)"))}");
 
                 return BadRequest(new
                 {
@@ -127,7 +129,7 @@ namespace Ecos.Api.Controllers
                 // If no root folder exists, the system creates one automatically
                 if (!rootFolders.Any())
                 {
-                    var rootFolder = await _fileManagerService.CreateRootFolderAsync(userId.Value);
+                    var rootFolder = await _fileManagerService.CreateRootFolderAsync();
                     folderId = rootFolder.Id;
                 }
                 else
@@ -137,7 +139,12 @@ namespace Ecos.Api.Controllers
             }
             request.FolderId = folderId;
             var (uploadedFiles, failedFiles) = await _fileManagerService.UploadFilesAsync(request , userId.Value);
-            await _loggingService.LogAsync("UploadFiles", TrackedEntity.File, null, null, new { uploadedFiles, failedFiles }, userId.ToString());
+            await _loggingService.LogAsync(
+    "UploadFiles", TrackedEntity.File, null,
+    null, null, userId.ToString(),
+    "Files uploaded",
+    $"Uploaded: {uploadedFiles.Count}, Failed: {failedFiles.Count}, FolderId: {request.FolderId}"
+);
             return Ok(new
             {
                 meta = new { code = uploadedFiles.Any() ? 1 : 0, message = "File upload completed" },
@@ -154,47 +161,94 @@ namespace Ecos.Api.Controllers
             var userId = GetUserIdFromToken();
             if (userId == null)
             {
-                await _loggingService.LogErrorAsync("Unauthorized folder access attempt", "Invalid token", "Anonymous");
-                return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
+                await _loggingService.LogErrorAsync(
+                    "Unauthorized folder access attempt",
+                    "Invalid token",
+                    "Anonymous"
+                );
+                return Unauthorized(new
+                {
+                    meta = new { code = 0, message = "Invalid or missing authorization token." }
+                });
             }
 
-            FolderResponse? response;
+            FolderResponse? folder;
+            List<FolderPathItem>? path = null;
 
             if (folderId.HasValue)
             {
-                // Fetch specific folder
-                response = await _fileManagerService.GetFolderByIdAsync(folderId.Value);
-                if (response == null)
+                await _loggingService.LogAsync(
+                    "GetFolderById", TrackedEntity.Folder, folderId, null, null, userId.ToString(),
+                    "Fetched folder by ID", $"FolderId: {folderId}"
+                );
+
+                folder = await _fileManagerService.GetFolderByIdAsync(folderId.Value);
+                if (folder == null)
                 {
-                    return NotFound(new { meta = new { code = 0, message = "Folder not found" } });
+                    return NotFound(new
+                    {
+                        meta = new { code = 0, message = "Folder not found" }
+                    });
                 }
+
+                folder = await _fileManagerService.GetFolderByIdAsync(folderId.Value);
+                if (folder == null)
+                {
+                    return NotFound(new
+                    {
+                        meta = new { code = 0, message = "Folder not found" }
+                    });
+                }
+
+                path = await _fileManagerService.GetFolderPathAsync(folderId.Value);
+
+
+                return Ok(new
+                {
+                    meta = new { code = 1, message = "Folder retrieved successfully" },
+                    data = folder,
+                    path
+                });
             }
             else
             {
-                // Fetch root folders
                 var rootFolders = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value);
 
-                // If no root folder exists, create one
                 if (!rootFolders.Any())
                 {
-                    var rootFolder = await _fileManagerService.CreateRootFolderAsync(userId.Value);
-                    rootFolders = new List<FolderResponse> { rootFolder };
+                    folder = await _fileManagerService.CreateRootFolderAsync();
+                }
+                else
+                {
+                    folder = rootFolders.First(); // Just take the first one as root
                 }
 
-                return Ok(new { meta = new { code = 1, message = "Folders retrieved successfully" }, data = rootFolders });
-            }
+                await _loggingService.LogAsync(
+                    "GetRootFolder", TrackedEntity.Folder, folder?.Id, null, null, userId.ToString(),
+                    "Fetched root folder"
+                );
+                path = new List<FolderPathItem>
+        {
+            new FolderPathItem(folder.Id, folder.Name)
+        };
 
-            await _loggingService.LogAsync("GetFolders", TrackedEntity.Folder, folderId, null, null, userId.ToString());
-            return Ok(new { meta = new { code = 1, message = "Folder retrieved successfully" }, data = response });
+                return Ok(new
+                {
+                    meta = new { code = 1, message = "Root folder retrieved successfully" },
+                    data = folder,
+                    path
+                });
+            }
         }
 
         [HttpGet("file/{fileId}")]
         public async Task<IActionResult> GetFileById(Guid fileId)
         {
             var response = await _fileManagerService.GetFileByIdAsync(fileId);
-            await _loggingService.LogAsync("GetFileById", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString());
+            var path = await _fileManagerService.GetFilePathAsync(fileId); // Returns List<FolderPathItem>
+            await _loggingService.LogAsync("GetFileById", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "Fetched file by ID", $"FileId: {fileId}");
             return response != null
-                ? Ok(new { meta = new { code = 1, message = "File retrieved successfully" }, data = response })
+                ? Ok(new { meta = new { code = 1, message = "File retrieved successfully" }, data = response ,path })
                 : NotFound(new { meta = new { code = 0, message = "File not found" } });
         }
 
@@ -206,7 +260,7 @@ namespace Ecos.Api.Controllers
             {
                 return NotFound(new { meta = new { code = 0, message = "File not found or deleted" } });
             }
-            await _loggingService.LogAsync("DownloadFile", TrackedEntity.File, fileId, null, new { fileName }, GetUserIdFromToken()?.ToString());
+            await _loggingService.LogAsync("DownloadFile", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "File downloaded", $"FileName: {fileName}");
             return File(fileStream, contentType ?? "application/octet-stream", fileName);
         }
 
@@ -216,7 +270,7 @@ namespace Ecos.Api.Controllers
             var result = await _fileManagerService.DeleteFileAsync(fileId);
             if (result)
             {
-                await _loggingService.LogAsync("DeleteFile", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString());
+                await _loggingService.LogAsync("DeleteFile", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "File deleted", $"FileId: {fileId}");
             }
             return result
                 ? Ok(new { meta = new { code = 1, message = "File deleted successfully" } })
@@ -236,7 +290,7 @@ namespace Ecos.Api.Controllers
             var result = await _fileManagerService.DeleteFolderAsync(folderId);
             if (result)
             {
-                await _loggingService.LogAsync("DeleteFolder", TrackedEntity.Folder, folderId, null, null, userId.ToString());
+                await _loggingService.LogAsync("DeleteFolder", TrackedEntity.Folder, folderId, null, null, userId.ToString(), "Folder deleted", $"FolderId: {folderId}");
             }
             return result
                 ? Ok(new { meta = new { code = 1, message = "Folder deleted successfully" } })

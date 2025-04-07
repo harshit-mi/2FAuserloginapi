@@ -29,10 +29,10 @@ namespace Ecos.Application.Middleware
             {
                 // Create a new scope for resolving scoped services
                 using var scope = _serviceScopeFactory.CreateScope();
-                var loggingService = scope.ServiceProvider.GetRequiredService<LoggingService>();
+                var loggingService = scope.ServiceProvider.GetRequiredService<ILoggingService>();
 
                 // Log the error
-              //  await loggingService.LogErrorAsync(ex.Message, ex.StackTrace, "System");
+                await loggingService.LogErrorAsync(ex.Message, ex.StackTrace, "System");
 
                 // Prepare the error response in the required format
                 context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
@@ -43,7 +43,7 @@ namespace Ecos.Application.Middleware
                     meta = new
                     {
                         code = 0,
-                        message = new List<string> { "An unexpected error occurred." }
+                        message = new List<string> { "An unexpected error occurred."+" i.e. " +ex.Message }
                     }
                 };
 

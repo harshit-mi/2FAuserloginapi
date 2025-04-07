@@ -48,7 +48,7 @@ namespace Ecos.Application.Services
                 // If no root folder exists, the system creates one automatically
                 if (!rootFolders.Any())
                 {
-                    var rootFolder = await CreateRootFolderAsync(userId);
+                    var rootFolder = await CreateRootFolderAsync();
                     parentFolder = await _context.Folders.FindAsync(rootFolder.Id);
                 }
                 else
@@ -120,15 +120,23 @@ namespace Ecos.Application.Services
             await _context.SaveChangesAsync();
             return (uploadedFiles, failedFiles);
         }
-        
-        public async Task<FolderResponse> CreateRootFolderAsync(Guid userId)
+
+        public async Task<FolderResponse> CreateRootFolderAsync()
         {
+            var existingRoot = await _context.Folders
+                .FirstOrDefaultAsync(f => f.ParentFolderId == null);
+
+            if (existingRoot != null)
+            {
+                return new FolderResponse(existingRoot.Id, existingRoot.Name, new List<FileResponse>(), new List<FolderResponse>());
+            }
+
             var rootFolder = new Folder
             {
                 Id = Guid.NewGuid(),
                 Name = "Root",
                 ParentFolderId = null,
-                UserId = userId,
+                UserId = null, // No user binding for global root
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -141,7 +149,7 @@ namespace Ecos.Application.Services
         public async Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId)
         {
             var rootFolders = await _context.Folders
-                .Where(f => f.ParentFolderId == null && f.UserId == userId) // Filter by userId
+                .Where(f => f.ParentFolderId == null) // Filter by userId
                 .Include(f => f.Files.Where(file => file.UserId == userId)) // Ensure only user’s files
                 .Include(f => f.SubFolders)
                     .ThenInclude(sf => sf.Files.Where(file => file.UserId == userId)) // Filter subfolder files
@@ -213,6 +221,43 @@ namespace Ecos.Application.Services
             stream.Position = 0;
 
             return (stream, file.Name, file.ContentType);
+        }
+
+        public async Task<List<FolderPathItem>> GetFolderPathAsync(Guid folderId)
+        {
+            var path = new List<FolderPathItem>();
+            var current = await _context.Folders.FindAsync(folderId);
+
+            while (current != null)
+            {
+                path.Insert(0, new FolderPathItem(current.Id, current.Name));
+                if (current.ParentFolderId == null) break;
+                current = await _context.Folders.FindAsync(current.ParentFolderId.Value);
+            }
+
+            return path;
+        }
+
+        public async Task<List<FolderPathItem>> GetFilePathAsync(Guid fileId)
+        {
+            var path = new List<FolderPathItem>();
+            var file = await _context.Files.FindAsync(fileId);
+
+            if (file == null) return path;
+
+            Guid? currentFolderId = file.FolderId;
+
+            // Traverse up the folder tree
+            while (currentFolderId != null)
+            {
+                var folder = await _context.Folders.FindAsync(currentFolderId);
+                if (folder == null) break;
+
+                path.Insert(0, new FolderPathItem(folder.Id, folder.Name));
+                currentFolderId = folder.ParentFolderId;
+            }
+
+            return path;
         }
     }
 }

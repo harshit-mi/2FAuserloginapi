@@ -9,21 +9,39 @@ using Ecos.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecos.Application.Services
 {
     public class LoggingService : ILoggingService
     {
+        //private readonly DataContext _dbContext;
+        //private readonly IHttpContextAccessor _httpContextAccessor;
+
+        //public LoggingService(DataContext dbContext, IHttpContextAccessor httpContextAccessor)
+        //{
+        //    _dbContext = dbContext;
+        //    _httpContextAccessor = httpContextAccessor;
+        //}
         private readonly DataContext _dbContext;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public LoggingService(DataContext dbContext, IHttpContextAccessor httpContextAccessor)
+        public LoggingService(IServiceScopeFactory scopeFactory, IHttpContextAccessor httpContextAccessor)
         {
-            _dbContext = dbContext;
+            // Create scope and resolve DataContext once, for this service lifetime
+            var scope = scopeFactory.CreateScope();
+            _dbContext = scope.ServiceProvider.GetRequiredService<DataContext>();
             _httpContextAccessor = httpContextAccessor;
         }
-
-        public async Task LogAsync(string action, TrackedEntity entity, Guid? entityId, object? oldValue, object? newValue, string performedBy)
+        public async Task LogAsync(
+            string action,
+            TrackedEntity entity,
+            Guid? entityId,
+            object? oldValue,
+            object? newValue,
+            string performedBy,
+            string? message = null,
+            string? additionalInfo = null)
         {
             try
             {
@@ -31,16 +49,18 @@ namespace Ecos.Application.Services
 
                 var logEntry = new LogEntry
                 {
+                    Id = Guid.NewGuid(),
                     Action = action,
                     Entity = entity,
                     EntityId = entityId,
+                    Message = message,
                     OldValue = oldValue != null ? JsonDocument.Parse(JsonSerializer.Serialize(oldValue)) : null,
                     NewValue = newValue != null ? JsonDocument.Parse(JsonSerializer.Serialize(newValue)) : null,
                     PerformedBy = performedBy,
                     IPAddress = httpContext?.Connection?.RemoteIpAddress?.ToString(),
                     UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
                     Timestamp = DateTime.UtcNow,
-                    AdditionalInfo = "N/A"
+                    AdditionalInfo = additionalInfo ?? GenerateAdditionalInfo(action, entity, entityId, performedBy)
                 };
 
                 await _dbContext.Logs.AddAsync(logEntry);
@@ -53,18 +73,29 @@ namespace Ecos.Application.Services
             }
         }
 
-        // Handle Logging Failures Separately
+        private string GenerateAdditionalInfo(string action, TrackedEntity entity, Guid? entityId, string performedBy)
+        {
+            return $"Action '{action}' was performed on '{entity}' (ID: {entityId?.ToString() ?? "N/A"}) by '{performedBy}' at {DateTime.UtcNow:u}";
+        }
+
         private async Task SaveLogFailureAsync(string action, TrackedEntity entity, string performedBy, string errorDetails)
         {
             try
             {
                 var logFailureEntry = new LogEntry
                 {
+                    Id = Guid.NewGuid(),
                     Action = "LOGGING_FAILURE",
                     Entity = entity,
-                    NewValue = JsonDocument.Parse(JsonSerializer.Serialize(new { FailedAction = action, Error = errorDetails })),
+                    Message = $"Logging failed for action: {action}",
+                    NewValue = JsonDocument.Parse(JsonSerializer.Serialize(new
+                    {
+                        FailedAction = action,
+                        Error = errorDetails
+                    })),
                     PerformedBy = performedBy,
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = DateTime.UtcNow,
+                    AdditionalInfo = "Automatic fallback for logging failure."
                 };
 
                 await _dbContext.Logs.AddAsync(logFailureEntry);
@@ -78,8 +109,16 @@ namespace Ecos.Application.Services
 
         public async Task LogErrorAsync(string errorMessage, string stackTrace, string performedBy)
         {
-            await LogAsync("ERROR", TrackedEntity.System, null, null,
-                new { ErrorMessage = errorMessage, StackTrace = stackTrace }, performedBy);
+            await LogAsync(
+                action: "ERROR",
+                entity: TrackedEntity.System,
+                entityId: null,
+                oldValue: null,
+                newValue: new { ErrorMessage = errorMessage, StackTrace = stackTrace },
+                performedBy: performedBy,
+                message: "Unhandled exception occurred.",
+                additionalInfo: $"Stack trace captured at {DateTime.UtcNow:u}"
+            );
         }
 
         public async Task<IEnumerable<LogEntry>> GetLogsAsync(TrackedEntity? entity = null, Guid? id = null)

@@ -13,7 +13,7 @@ namespace Ecos.Application.Services
     public interface IFileManagerService
     {
         Task<FolderResponse> CreateFolderAsync(CreateFolderRequest request , Guid userId);
-        Task<FolderResponse> CreateRootFolderAsync(Guid userId);
+        Task<FolderResponse> CreateRootFolderAsync();
         Task<(List<FileResponse> uploadedFiles, List<string> failedFiles)> UploadFilesAsync(UploadFileRequest request , Guid userId);
         Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId);
         Task<FolderResponse?> GetFolderByIdAsync(Guid folderId);
@@ -21,5 +21,9 @@ namespace Ecos.Application.Services
         Task<bool> DeleteFolderAsync(Guid folderId);
         Task<FileResponse?> GetFileByIdAsync(Guid fileId);
         Task<(Stream?, string?, string?)> DownloadFileAsync(Guid fileId);
+
+        Task<List<FolderPathItem>> GetFolderPathAsync(Guid folderId);
+
+        Task<List<FolderPathItem>> GetFilePathAsync(Guid fileId);
     }
 }
