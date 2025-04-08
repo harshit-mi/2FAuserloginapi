@@ -222,7 +222,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowAll",
         policy => policy.AllowAnyOrigin()
                         .AllowAnyMethod()
-                        .AllowAnyHeader());
+                        .AllowAnyHeader()
+    .WithExposedHeaders("Content-Disposition"));
 });
 builder.WebHost.ConfigureKestrel(options =>
 {
