@@ -14,7 +14,7 @@ namespace Ecos.Application.Services
     {
         Task<FolderResponse> CreateFolderAsync(CreateFolderRequest request , Guid userId);
         Task<FolderResponse> CreateRootFolderAsync();
-        Task<(List<FileResponse> uploadedFiles, List<string> failedFiles)> UploadFilesAsync(UploadFileRequest request , Guid userId);
+        Task<(List<FileResponse> uploadedFiles, List<object> failedFiles)> UploadFilesAsync(UploadFileRequest request, Guid userId);
         Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId);
         Task<FolderResponse?> GetFolderByIdAsync(Guid folderId);
         Task<bool> DeleteFileAsync(Guid fileId);

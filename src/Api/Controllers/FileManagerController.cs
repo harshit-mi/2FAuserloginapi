@@ -98,35 +98,15 @@ namespace Ecos.Api.Controllers
                 return BadRequest(new { meta = new { code = 0, message = "No files uploaded" } });
             }
 
-            const long MaxFileSize = 100 * 1024 * 1024; // 100MB in bytes
-            var oversizedFiles = request.Files.Where(f => f.Length > MaxFileSize).ToList();
+            const long MaxFileSize = 100 * 1024 * 1024;
+            var uploadedFiles = new List<FileResponse>();
+            var failedFiles = new List<object>();
 
-            if (oversizedFiles.Any())
-            {
-                await _loggingService.LogAsync("UploadFilesFailed", TrackedEntity.File, null, null,null
-            , userId.ToString(), "Request contains Oversized files", $"Oversized Files: {string.Join(", ", oversizedFiles.Select(f => $"{f.FileName} ({(f.Length / (1024 * 1024)):F2} MB)"))}");
-
-                return BadRequest(new
-                {
-                    meta = new { code = 0, message = "No files were uploaded. Some files exceed the 100MB size limit." },
-                    data = new
-                    {
-                        oversizedFiles = oversizedFiles.Select(f => new
-                        {
-                            FileName = f.FileName,
-                            SizeInMB = (f.Length / (1024 * 1024)).ToString("F2")
-                        })
-                    }
-                });
-            }
-
-            // Determine the target folder (assign root folder if none is provided)
+            // Determine the folder ID
             var folderId = request.FolderId;
             if (folderId == null || folderId == Guid.Empty)
             {
-                var rootFolders = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value) ?? new List<FolderResponse>(); ;
-
-                // If no root folder exists, the system creates one automatically
+                var rootFolders = await _fileManagerService.GetAllFoldersWithFilesAsync(userId.Value) ?? new List<FolderResponse>();
                 if (!rootFolders.Any())
                 {
                     var rootFolder = await _fileManagerService.CreateRootFolderAsync();
@@ -134,17 +114,75 @@ namespace Ecos.Api.Controllers
                 }
                 else
                 {
-                    folderId = rootFolders.First().Id; // Use the existing root folder
+                    folderId = rootFolders.First().Id;
                 }
             }
-            request.FolderId = folderId;
-            var (uploadedFiles, failedFiles) = await _fileManagerService.UploadFilesAsync(request , userId.Value);
+
+            foreach (var file in request.Files)
+            {
+                if (file.Length > MaxFileSize)
+                {
+                    failedFiles.Add(new
+                    {
+                        FileName = file.FileName,
+                        Reason = "File size exceeds 100MB limit",
+                        SizeInMB = (file.Length / (1024 * 1024)).ToString("F2")
+                    });
+
+                    await _loggingService.LogAsync(
+                        "UploadFileSkipped",
+                        TrackedEntity.File,
+                        null, null, null, userId.ToString(),
+                        "File skipped due to size limit",
+                        $"File: {file.FileName}, Size: {(file.Length / (1024 * 1024)):F2} MB"
+                    );
+
+                    continue;
+                }
+
+                try
+                {
+                    var singleFileRequest = new UploadFileRequest
+                    {
+                        FolderId = folderId,
+                        Files = new List<IFormFile> { file }
+                    };
+
+                    var (uploaded, failed) = await _fileManagerService.UploadFilesAsync(singleFileRequest, userId.Value);
+
+                    if (uploaded.Any())
+                        uploadedFiles.AddRange(uploaded);
+
+                    if (failed.Any())
+                    {
+                        failedFiles.AddRange(failed.Select(fileName => new
+                        {
+                            FileName = fileName,
+                            Reason = "Upload failed"
+                        }));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failedFiles.Add(new
+                    {
+                        FileName = file.FileName,
+                        Reason = "Unexpected error",
+                        ExceptionMessage = ex.Message
+                    });
+
+                    await _loggingService.LogErrorAsync("Upload failed", ex.Message, userId.ToString());
+                }
+            }
+
             await _loggingService.LogAsync(
-    "UploadFiles", TrackedEntity.File, null,
-    null, null, userId.ToString(),
-    "Files uploaded",
-    $"Uploaded: {uploadedFiles.Count}, Failed: {failedFiles.Count}, FolderId: {request.FolderId}"
-);
+                "UploadFiles",
+                TrackedEntity.File,
+                null, null, null, userId.ToString(),
+                "Upload attempt finished",
+                $"Uploaded: {uploadedFiles.Count}, Failed: {failedFiles.Count}, FolderId: {folderId}"
+            );
+
             return Ok(new
             {
                 meta = new { code = uploadedFiles.Any() ? 1 : 0, message = "File upload completed" },
@@ -152,7 +190,7 @@ namespace Ecos.Api.Controllers
                 {
                     uploadedFiles,
                     failedFiles
-                } 
+                }
             });
         }
         [HttpGet("folders")]
@@ -264,37 +302,59 @@ namespace Ecos.Api.Controllers
             return File(fileStream, contentType ?? "application/octet-stream", fileName);
         }
 
-        [HttpDelete("file/{fileId}")]
-        public async Task<IActionResult> DeleteFile(Guid fileId)
-        {
-            var result = await _fileManagerService.DeleteFileAsync(fileId);
-            if (result)
-            {
-                await _loggingService.LogAsync("DeleteFile", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "File deleted", $"FileId: {fileId}");
-            }
-            return result
-                ? Ok(new { meta = new { code = 1, message = "File deleted successfully" } })
-                : NotFound(new { meta = new { code = 0, message = "File not found or could not be deleted" } });
-        }
-
-        [HttpDelete("folder/{folderId}")]
-        public async Task<IActionResult> DeleteFolder(Guid folderId)
+        [HttpDelete("{type}/{id}")]
+        public async Task<IActionResult> DeleteItem(string type, Guid id)
         {
             var userId = GetUserIdFromToken();
 
             if (userId == null)
             {
-                await _loggingService.LogErrorAsync("Unauthorized file upload attempt", "Invalid token", "Anonymous");
+                await _loggingService.LogErrorAsync("Unauthorized deletion attempt", "Invalid token", "Anonymous");
                 return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
             }
-            var result = await _fileManagerService.DeleteFolderAsync(folderId);
+
+            bool result = false;
+            string message = "";
+            string logAction = "";
+            TrackedEntity? entity = null;
+
+            switch (type.ToLower())
+            {
+                case "file":
+                    result = await _fileManagerService.DeleteFileAsync(id);
+                    logAction = "DeleteFile";
+                    entity = TrackedEntity.File;
+                    message = result ? "File deleted successfully" : "File not found or could not be deleted";
+                    break;
+
+                case "folder":
+                    result = await _fileManagerService.DeleteFolderAsync(id);
+                    logAction = "DeleteFolder";
+                    entity = TrackedEntity.Folder;
+                    message = result ? "Folder and its contents deleted successfully" : "Folder not found or could not be deleted";
+                    break;
+
+                default:
+                    return BadRequest(new { meta = new { code = 0, message = "Invalid type. Allowed values are 'file' or 'folder'." } });
+            }
+
             if (result)
             {
-                await _loggingService.LogAsync("DeleteFolder", TrackedEntity.Folder, folderId, null, null, userId.ToString(), "Folder deleted", $"FolderId: {folderId}");
+                await _loggingService.LogAsync(
+                    logAction,
+                    entity.Value,
+                    id,
+                    null,
+                    null,
+                    userId.ToString(),
+                    $"{type.First().ToString().ToUpper() + type.Substring(1)} deleted",
+                    $"{type}Id: {id}"
+                );
             }
+
             return result
-                ? Ok(new { meta = new { code = 1, message = "Folder deleted successfully" } })
-                : BadRequest(new { meta = new { code = 0, message = "Folder not found or has subfolders, cannot be deleted" } });
+                ? Ok(new { meta = new { code = 1, message } })
+                : BadRequest(new { meta = new { code = 0, message } });
         }
     }
 }
