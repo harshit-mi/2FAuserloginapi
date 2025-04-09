@@ -25,5 +25,11 @@ namespace Ecos.Application.Services
         Task<List<FolderPathItem>> GetFolderPathAsync(Guid folderId);
 
         Task<List<FolderPathItem>> GetFilePathAsync(Guid fileId);
+
+        Task<(bool Success, string? ErrorMessage)> RetryUploadByKeyAsync(Guid retryKey, Guid userId);
+
+        Task<bool> RenameFileAsync(Guid fileId, string newName);
+        Task<bool> RenameFolderAsync(Guid folderId, string newName);
+
     }
 }

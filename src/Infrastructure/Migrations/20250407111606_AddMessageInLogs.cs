@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Ecos.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddMesageColumnInLogs : Migration
+    public partial class AddMessageInLogs : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

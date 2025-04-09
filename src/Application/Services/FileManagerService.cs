@@ -96,12 +96,27 @@ namespace Ecos.Application.Services
             var uploadedFiles = new List<FileResponse>();
             var failedFiles = new List<object>();
 
-            foreach (var file in request.Files)
+            foreach (var fileItem in request.Files)
             {
+                var file = fileItem.File;
+                var fileId = fileItem.FileId;
+
+                var fileExists = await _context.Files.FindAsync(fileId);
+                if (fileExists != null)
+                {
+                    failedFiles.Add(new
+                    {
+                        FileId = fileId,
+                        FileName = fileItem.File?.FileName ?? "[null]",
+                        Reason = "FileId already exists"
+                    });
+
+                    continue;
+                }
+
+                var uniqueFileName = $"{Path.GetFileNameWithoutExtension(file.FileName)}_{fileId}{Path.GetExtension(file.FileName)}";
                 try
                 {
-                    var fileId = Guid.NewGuid();
-                    var uniqueFileName = $"{Path.GetFileNameWithoutExtension(file.FileName)}_{fileId}{Path.GetExtension(file.FileName)}";
                     var blob = container.GetBlobClient(uniqueFileName);
 
                     await using var stream = file.OpenReadStream();
@@ -135,13 +150,35 @@ namespace Ecos.Application.Services
                 }
                 catch (Exception ex)
                 {
+                    using var memoryStream = new MemoryStream();
+                    await file.CopyToAsync(memoryStream);
+
+                    var retryKey = fileId; // ✅ Use FileId as RetryKey
+
+                    var retryEntry = new FileUploadRetry
+                    {
+                        RetryKey = retryKey,
+                        FileName = file.FileName,
+                        ContentType = file.ContentType,
+                        Size = file.Length,
+                        FileContent = memoryStream.ToArray(),
+                        FolderId = request.FolderId ?? Guid.NewGuid(),
+                        UserId = userId,
+                        RetryCount = 0,
+                        IsUploaded = false,
+                        Error = ex.Message,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    await _context.FileUploadRetries.AddAsync(retryEntry);
                     failedFiles.Add(new
                     {
+                        FileId = fileId,
                         FileName = file.FileName,
                         Reason = "Upload failed",
+                        RetryKey = retryKey,
                         ExceptionMessage = ex.Message
                     });
-
                 }
             }
 
@@ -378,6 +415,96 @@ namespace Ecos.Application.Services
             }
 
             return path;
+        }
+        public async Task<(bool Success, string? ErrorMessage)> RetryUploadByKeyAsync(Guid retryKey, Guid userId)
+        {
+            const long MaxFileSize = 100 * 1024 * 1024; // 100MB
+
+            var retry = await _context.FileUploadRetries.FirstOrDefaultAsync(
+                r => r.RetryKey == retryKey && r.UserId == userId && !r.IsUploaded && r.RetryCount < 5
+            );
+
+            if (retry == null)
+                return (false, "Retry not found or already completed.");
+
+            if (retry.Size > MaxFileSize)
+                return (false, $"File size exceeds 100MB limit. Size: {(retry.Size / (1024 * 1024)):F2} MB");
+
+            try
+            {
+                await using var stream = new MemoryStream(retry.FileContent);
+
+                var formFile = new FormFile(stream, 0, retry.Size, "file", retry.FileName)
+                {
+                    Headers = new HeaderDictionary(),
+                    ContentType = retry.ContentType
+                };
+
+                var uploadRequest = new UploadFileRequest
+                {
+                    FolderId = retry.FolderId,
+                    Files = new List<FileUploadItem>
+            {
+                new FileUploadItem
+                {
+                    FileId = retry.RetryKey,
+                    File = formFile
+                }
+            }
+                };
+
+                var (uploaded, failed) = await UploadFilesAsync(uploadRequest, userId);
+
+                if (uploaded.Any())
+                {
+                    _context.FileUploadRetries.Remove(retry); // Clean up successful retry
+                    await _context.SaveChangesAsync();
+                    return (true, null);
+                }
+
+                retry.RetryCount++;
+                retry.Error = "Retry failed";
+                await _context.SaveChangesAsync();
+                return (false, "Retry failed");
+            }
+            catch (Exception ex)
+            {
+                retry.RetryCount++;
+                retry.Error = ex.Message;
+                await _context.SaveChangesAsync();
+
+                return (false, $"Retry failed with error: {ex.Message}");
+            }
+        }
+
+        public async Task<bool> RenameFileAsync(Guid fileId, string newName)
+        {
+            var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
+            if (file == null) return false;
+
+            // Get current extension
+            var currentExtension = Path.GetExtension(file.Name);
+
+            // Remove any extension from the new name
+            var baseName = Path.GetFileNameWithoutExtension(newName);
+
+            // Build final name with original extension
+            file.Name = $"{baseName}{currentExtension}";
+
+            _context.Files.Update(file);
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> RenameFolderAsync(Guid folderId, string newName)
+        {
+            var folder = await _context.Folders.FirstOrDefaultAsync(f => f.Id == folderId);
+            if (folder == null) return false;
+
+            folder.Name = newName;
+            _context.Folders.Update(folder);
+            await _context.SaveChangesAsync();
+            return true;
         }
     }
 }

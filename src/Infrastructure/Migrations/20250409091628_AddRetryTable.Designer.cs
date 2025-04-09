@@ -13,8 +13,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Ecos.Infrastructure.Migrations
 {
     [DbContext(typeof(DataContext))]
-    [Migration("20250407112109_AddMesageColumnInLogs")]
-    partial class AddMesageColumnInLogs
+    [Migration("20250409091628_AddRetryTable")]
+    partial class AddRetryTable
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -61,6 +61,53 @@ namespace Ecos.Infrastructure.Migrations
                     b.HasIndex("FolderId");
 
                     b.ToTable("Files");
+                });
+
+            modelBuilder.Entity("Ecos.Domain.Entities.FileUploadRetry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<byte[]>("FileContent")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("FolderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsUploaded")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("RetryKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("FileUploadRetries");
                 });
 
             modelBuilder.Entity("Ecos.Domain.Entities.Folder", b =>

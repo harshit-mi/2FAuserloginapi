@@ -8,6 +8,7 @@ using Ecos.Application.Services;
 using Ecos.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecos.Api.Controllers
 {
@@ -118,15 +119,38 @@ namespace Ecos.Api.Controllers
                 }
             }
 
-            foreach (var file in request.Files)
+            var validFileItems = new List<FileUploadItem>();
+
+            foreach (var fileItem in request.Files)
             {
-                if (file.Length > MaxFileSize)
+                if (fileItem.File == null || fileItem.File.Length == 0)
                 {
                     failedFiles.Add(new
                     {
-                        FileName = file.FileName,
+                        FileId = fileItem.FileId,
+                        FileName = "[null]",
+                        Reason = "File is missing or empty"
+                    });
+
+                    await _loggingService.LogAsync(
+                        "UploadFileSkipped",
+                        TrackedEntity.File,
+                        null, null, null, userId.ToString(),
+                        "File skipped due to being null or empty",
+                        $"FileId: {fileItem.FileId}"
+                    );
+
+                    continue;
+                }
+
+                if (fileItem.File.Length > MaxFileSize)
+                {
+                    failedFiles.Add(new
+                    {
+                        FileId = fileItem.FileId,
+                        FileName = fileItem.File.FileName,
                         Reason = "File size exceeds 100MB limit",
-                        SizeInMB = (file.Length / (1024 * 1024)).ToString("F2")
+                        SizeInMB = (fileItem.File.Length / (1024 * 1024)).ToString("F2")
                     });
 
                     await _loggingService.LogAsync(
@@ -134,44 +158,46 @@ namespace Ecos.Api.Controllers
                         TrackedEntity.File,
                         null, null, null, userId.ToString(),
                         "File skipped due to size limit",
-                        $"File: {file.FileName}, Size: {(file.Length / (1024 * 1024)):F2} MB"
+                        $"File: {fileItem.File.FileName}, Size: {(fileItem.File.Length / (1024 * 1024)):F2} MB"
                     );
 
                     continue;
                 }
 
+                validFileItems.Add(new FileUploadItem
+                {
+                    FileId = fileItem.FileId != Guid.Empty ? fileItem.FileId : Guid.NewGuid(),
+                    File = fileItem.File
+                });
+            }
+
+            if (validFileItems.Any())
+            {
+                var uploadRequest = new UploadFileRequest
+                {
+                    FolderId = folderId,
+                    Files = validFileItems
+                };
+
                 try
                 {
-                    var singleFileRequest = new UploadFileRequest
-                    {
-                        FolderId = folderId,
-                        Files = new List<IFormFile> { file }
-                    };
-
-                    var (uploaded, failed) = await _fileManagerService.UploadFilesAsync(singleFileRequest, userId.Value);
+                    var (uploaded, failed) = await _fileManagerService.UploadFilesAsync(uploadRequest, userId.Value);
 
                     if (uploaded.Any())
                         uploadedFiles.AddRange(uploaded);
 
                     if (failed.Any())
-                    {
-                        failedFiles.AddRange(failed.Select(fileName => new
-                        {
-                            FileName = fileName,
-                            Reason = "Upload failed"
-                        }));
-                    }
+                        failedFiles.AddRange(failed);
                 }
                 catch (Exception ex)
                 {
+                    await _loggingService.LogErrorAsync("Upload failed", ex.Message, userId.ToString());
+
                     failedFiles.Add(new
                     {
-                        FileName = file.FileName,
                         Reason = "Unexpected error",
                         ExceptionMessage = ex.Message
                     });
-
-                    await _loggingService.LogErrorAsync("Upload failed", ex.Message, userId.ToString());
                 }
             }
 
@@ -193,6 +219,30 @@ namespace Ecos.Api.Controllers
                 }
             });
         }
+
+
+        [HttpPost("retry-upload/{retryKey}")]
+        public async Task<IActionResult> RetryUploadByKey(Guid retryKey)
+        {
+            var userId = GetUserIdFromToken();
+            if (userId == null)
+                return Unauthorized(new { meta = new { code = 0, message = "Invalid token" } });
+
+            if (retryKey == Guid.Empty)
+                return BadRequest(new { meta = new { code = 0, message = "Invalid retry key" } });
+
+            var (success, error) = await _fileManagerService.RetryUploadByKeyAsync(retryKey, userId.Value);
+
+            if (success)
+                return Ok(new { meta = new { code = 1, message = "File upload retried successfully" } });
+
+            return BadRequest(new
+            {
+                meta = new { code = 0, message = "Retry failed", RetryKey = retryKey, error }
+            });
+        }
+
+
         [HttpGet("folders")]
         public async Task<IActionResult> GetFolders([FromQuery] Guid? folderId)
         {
@@ -349,6 +399,66 @@ namespace Ecos.Api.Controllers
                     userId.ToString(),
                     $"{type.First().ToString().ToUpper() + type.Substring(1)} deleted",
                     $"{type}Id: {id}"
+                );
+            }
+
+            return result
+                ? Ok(new { meta = new { code = 1, message } })
+                : BadRequest(new { meta = new { code = 0, message } });
+        }
+
+        [HttpPut("{type}/{id}/rename")]
+        public async Task<IActionResult> RenameItem(string type, Guid id, [FromBody] RenameRequest request)
+        {
+            var userId = GetUserIdFromToken();
+
+            if (userId == null)
+            {
+                await _loggingService.LogErrorAsync("Unauthorized rename attempt", "Invalid token", "Anonymous");
+                return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.NewName))
+            {
+                return BadRequest(new { meta = new { code = 0, message = "New name must not be empty." } });
+            }
+
+            bool result = false;
+            string message = "";
+            string logAction = "";
+            TrackedEntity? entity = null;
+
+            switch (type.ToLower())
+            {
+                case "file":
+                    result = await _fileManagerService.RenameFileAsync(id, request.NewName);
+                    logAction = "RenameFile";
+                    entity = TrackedEntity.File;
+                    message = result ? "File renamed successfully" : "File not found or rename failed";
+                    break;
+
+                case "folder":
+                    result = await _fileManagerService.RenameFolderAsync(id, request.NewName);
+                    logAction = "RenameFolder";
+                    entity = TrackedEntity.Folder;
+                    message = result ? "Folder renamed successfully" : "Folder not found or rename failed";
+                    break;
+
+                default:
+                    return BadRequest(new { meta = new { code = 0, message = "Invalid type. Allowed values are 'file' or 'folder'." } });
+            }
+
+            if (result)
+            {
+                await _loggingService.LogAsync(
+                    logAction,
+                    entity.Value,
+                    id,
+                    null,
+                    null,
+                    userId.ToString(),
+                    $"{type.First().ToString().ToUpper() + type.Substring(1)} renamed",
+                    $"NewName: {request.NewName}"
                 );
             }
 
