@@ -18,7 +18,7 @@ namespace Ecos.Application.DTOs.Response
 
         public string Type => "file";
 
-        public string Extension => Path.GetExtension(Name)?.ToLowerInvariant();
+        public string Extension => Path.GetExtension(Name)?.TrimStart('.').ToLowerInvariant();
 
         public List<FolderPathItem> path { get; set; }
 
