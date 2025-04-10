@@ -167,7 +167,9 @@ namespace Ecos.Api.Controllers
                 validFileItems.Add(new FileUploadItem
                 {
                     FileId = fileItem.FileId != Guid.Empty ? fileItem.FileId : Guid.NewGuid(),
-                    File = fileItem.File
+                    File = fileItem.File,
+                    //temperory-test
+                    AllowRetry = fileItem.AllowRetry
                 });
             }
 
@@ -332,9 +334,12 @@ namespace Ecos.Api.Controllers
         public async Task<IActionResult> GetFileById(Guid fileId)
         {
             var response = await _fileManagerService.GetFileByIdAsync(fileId);
-            var path = await _fileManagerService.GetFilePathAsync(fileId); // Returns List<FolderPathItem>
-            await _loggingService.LogAsync("GetFileById", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "Fetched file by ID", $"FileId: {fileId}");
-            response.path=path;
+            if (response != null)
+            {
+                var path = await _fileManagerService.GetFilePathAsync(fileId); // Returns List<FolderPathItem>
+                await _loggingService.LogAsync("GetFileById", TrackedEntity.File, fileId, null, null, GetUserIdFromToken()?.ToString(), "Fetched file by ID", $"FileId: {fileId}");
+                response.path = path;
+            }
             return response != null
                 ? Ok(new { meta = new { code = 1, message = "File retrieved successfully" }, data = response})
                 : NotFound(new { meta = new { code = 0, message = "File not found" } });
@@ -465,6 +470,32 @@ namespace Ecos.Api.Controllers
             return result
                 ? Ok(new { meta = new { code = 1, message } })
                 : BadRequest(new { meta = new { code = 0, message } });
+        }
+
+
+        [HttpGet("globalsearch")]
+        public async Task<IActionResult> GlobalSearch([FromQuery] string? query)
+        {
+            var userId = GetUserIdFromToken();
+
+            if (userId == null)
+            {
+                await _loggingService.LogErrorAsync("Unauthorized global search attempt", "Invalid token", "Anonymous");
+                return Unauthorized(new { meta = new { code = 0, message = "Invalid or missing authorization token." } });
+            }
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return BadRequest(new { meta = new { code = 0, message = "Search query must not be empty." } });
+            }
+
+            var result = await _fileManagerService.GlobalSearchAsync(query.Trim(), userId.Value);
+
+            return Ok(new
+            {
+                meta = new { code = 1, message = "Global search completed successfully." },
+                data = result
+            });
         }
     }
 }

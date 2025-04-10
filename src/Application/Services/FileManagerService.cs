@@ -117,6 +117,10 @@ namespace Ecos.Application.Services
                 var uniqueFileName = $"{Path.GetFileNameWithoutExtension(file.FileName)}_{fileId}{Path.GetExtension(file.FileName)}";
                 try
                 {
+                    //temperory-test
+                    if (fileItem.AllowRetry)
+                        throw new Exception("Forced failure for retry testing");
+
                     var blob = container.GetBlobClient(uniqueFileName);
 
                     await using var stream = file.OpenReadStream();
@@ -212,7 +216,7 @@ namespace Ecos.Application.Services
                 Id = Guid.NewGuid(),
                 Name = "Root",
                 ParentFolderId = null,
-                UserId = null, // No user binding for global root
+                UserId = null,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -356,6 +360,10 @@ namespace Ecos.Application.Services
         public async Task<FileResponse?> GetFileByIdAsync(Guid fileId)
         {
             var file = await _context.Files.FindAsync(fileId);
+            if (file == null)
+            {
+                return null;
+            }
             var uploadedByUser = await _userManager.FindByIdAsync(file.UserId.ToString());
             var uploadedBy = uploadedByUser?.UserName ?? "Unknown";
             return file != null ? new FileResponse(file.Id, file.Name, file.BlobStorageUrl,GetFilePathAsync(file.Id).Result, FormatSize(file.Size), uploadedBy, file.UploadedAt) : null;
@@ -505,6 +513,74 @@ namespace Ecos.Application.Services
             _context.Folders.Update(folder);
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<GlobalSearchResult> GlobalSearchAsync(string query, Guid userId)
+        {
+            var lowerQuery = query.ToLower();
+
+            var filesRaw = await _context.Files
+                .Where(f => f.Name.ToLower().Contains(lowerQuery) && f.UserId == userId)
+                .ToListAsync();
+
+            var foldersRaw = await _context.Folders
+                .Where(f => f.Name.ToLower().Contains(lowerQuery) && f.UserId == userId)
+                .Include(f => f.Files.Where(file => file.UserId == userId))
+                .Include(f => f.SubFolders.Where(sub => sub.UserId == userId))
+                .ToListAsync();
+
+            var fileItems = new List<SearchItem>();
+            foreach (var file in filesRaw)
+            {
+                var path = await GetFilePathAsync(file.Id);
+                fileItems.Add(new SearchItem
+                {
+                    Id = file.Id,
+                    Name = file.Name,
+                    Type = "File",
+                    CreatedAt = file.UploadedAt,
+                    SizeFormatted = FormatSize(file.Size),
+                    Path = path
+                });
+            }
+
+            var folderItems = new List<SearchItem>();
+            foreach (var folder in foldersRaw)
+            {
+                var path = await GetFolderPathAsync(folder.Id);
+                var totalBytes = folder.Files?.Sum(f => f.Size) ?? 0;
+
+                folderItems.Add(new SearchItem
+                {
+                    Id = folder.Id,
+                    Name = folder.Name,
+                    Type = "Folder",
+                    CreatedAt = folder.CreatedAt,
+                    SizeFormatted = FormatSize(totalBytes),
+                    Path = path,
+                    Files = folder.Files?.Select(f => new SearchItem
+                    {
+                        Id = f.Id,
+                        Name = f.Name,
+                        Type = "File",
+                        CreatedAt = f.UploadedAt,
+                        SizeFormatted = FormatSize(f.Size)
+                    }).ToList(),
+                    SubFolders = folder.SubFolders?.Select(sf => new SearchItem
+                    {
+                        Id = sf.Id,
+                        Name = sf.Name,
+                        Type = "Folder",
+                        CreatedAt = sf.CreatedAt
+                    }).ToList()
+                });
+            }
+
+            return new GlobalSearchResult
+            {
+                Files = fileItems,
+                Folders = folderItems
+            };
         }
     }
 }

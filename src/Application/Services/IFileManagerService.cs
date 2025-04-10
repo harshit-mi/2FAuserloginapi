@@ -30,6 +30,7 @@ namespace Ecos.Application.Services
 
         Task<bool> RenameFileAsync(Guid fileId, string newName);
         Task<bool> RenameFolderAsync(Guid folderId, string newName);
+        Task<GlobalSearchResult> GlobalSearchAsync(string query, Guid userId);
 
     }
 }

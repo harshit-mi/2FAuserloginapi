@@ -18,5 +18,8 @@ namespace Ecos.Application.DTOs.Request
     {
         public Guid FileId { get; set; } // Provided by frontend
         public IFormFile File { get; set; }
+
+        //temperory-test
+        public bool AllowRetry { get; set; }
     }
 }
