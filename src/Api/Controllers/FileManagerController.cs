@@ -129,7 +129,8 @@ namespace Ecos.Api.Controllers
                     {
                         FileId = fileItem.FileId,
                         FileName = "[null]",
-                        Reason = "File is missing or empty"
+                        Reason = "File is missing or empty",
+                        IsAllowRetry = false
                     });
 
                     await _loggingService.LogAsync(
@@ -150,7 +151,8 @@ namespace Ecos.Api.Controllers
                         FileId = fileItem.FileId,
                         FileName = fileItem.File.FileName,
                         Reason = "File size exceeds 100MB limit",
-                        SizeInMB = (fileItem.File.Length / (1024 * 1024)).ToString("F2")
+                        SizeInMB = (fileItem.File.Length / (1024 * 1024)).ToString("F2"),
+                        IsAllowRetry = false
                     });
 
                     await _loggingService.LogAsync(
@@ -195,10 +197,10 @@ namespace Ecos.Api.Controllers
                 {
                     await _loggingService.LogErrorAsync("Upload failed", ex.Message, userId.ToString());
 
-                    failedFiles.Add(new
+                    return Ok(new
                     {
-                        Reason = "Unexpected error",
-                        ExceptionMessage = ex.Message
+                        meta = new { code = uploadedFiles.Any() ? 1 : 0, message = "Upload failed , No files Uploaded" },
+                        data = ex.Message
                     });
                 }
             }
@@ -211,9 +213,19 @@ namespace Ecos.Api.Controllers
                 $"Uploaded: {uploadedFiles.Count}, Failed: {failedFiles.Count}, FolderId: {folderId}"
             );
 
+            var uploadedCount = uploadedFiles.Count;
+            var failedCount = failedFiles.Count;
+
+            string message = uploadedCount switch
+            {
+                > 0 when failedCount == 0 => "All files uploaded successfully.",
+                > 0 when failedCount > 0 => $"{uploadedCount} file(s) uploaded, {failedCount} file(s) failed.",
+                _ => "All file uploads failed."
+            };
+
             return Ok(new
             {
-                meta = new { code = uploadedFiles.Any() ? 1 : 0, message = "File upload completed" },
+                meta = new { code = uploadedFiles.Any() ? 1 : 0, message },
                 data = new
                 {
                     uploadedFiles,

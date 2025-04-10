@@ -108,7 +108,8 @@ namespace Ecos.Application.Services
                     {
                         FileId = fileId,
                         FileName = fileItem.File?.FileName ?? "[null]",
-                        Reason = "FileId already exists"
+                        Reason = "FileId already exists",
+                        IsAllowRetry = false
                     });
 
                     continue;
@@ -157,7 +158,7 @@ namespace Ecos.Application.Services
                     using var memoryStream = new MemoryStream();
                     await file.CopyToAsync(memoryStream);
 
-                    var retryKey = fileId; // ✅ Use FileId as RetryKey
+                    var retryKey = fileId;
 
                     var retryEntry = new FileUploadRetry
                     {
@@ -180,8 +181,7 @@ namespace Ecos.Application.Services
                         FileId = fileId,
                         FileName = file.FileName,
                         Reason = "Upload failed",
-                        RetryKey = retryKey,
-                        ExceptionMessage = ex.Message
+                        IsAllowRetry = true
                     });
                 }
             }
