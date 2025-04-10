@@ -96,7 +96,7 @@ namespace Ecos.Api.Controllers
             if (request.Files == null || request.Files.Count == 0)
             {
                 await _loggingService.LogAsync("UploadFiles", TrackedEntity.File, null, null, null, userId.ToString(), "No files uploaded", "Request contained zero files");
-                return BadRequest(new { meta = new { code = 0, message = "No files uploaded" } });
+                return BadRequest(new { meta = new { code = 2, message = "No files uploaded" } });
             }
 
             const long MaxFileSize = 100 * 1024 * 1024;
@@ -197,10 +197,9 @@ namespace Ecos.Api.Controllers
                 {
                     await _loggingService.LogErrorAsync("Upload failed", ex.Message, userId.ToString());
 
-                    return Ok(new
+                    return StatusCode(500, new
                     {
-                        meta = new { code = uploadedFiles.Any() ? 1 : 0, message = "Upload failed , No files Uploaded" },
-                        data = ex.Message
+                        meta = new { code = 0, message = "Upload failed. A technical error occurred. Please try again later." }
                     });
                 }
             }
@@ -223,9 +222,16 @@ namespace Ecos.Api.Controllers
                 _ => "All file uploads failed."
             };
 
+            int code = uploadedCount switch
+            {
+                > 0 when failedCount == 0 => 1,  // All success
+                > 0 when failedCount > 0 => 0,   // Partial success
+                _ => 2                           // All failed
+            };
+
             return Ok(new
             {
-                meta = new { code = uploadedFiles.Any() ? 1 : 0, message },
+                meta = new { code, message },
                 data = new
                 {
                     uploadedFiles,
