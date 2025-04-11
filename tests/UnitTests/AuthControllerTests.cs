@@ -16,6 +16,7 @@ using Newtonsoft.Json;
 using System.Net;
 using System.Security.Claims;
 using System.Web;
+using Microsoft.Extensions.Configuration;
 
 namespace Ecos.Api.Tests.Controllers
 {
@@ -28,6 +29,7 @@ namespace Ecos.Api.Tests.Controllers
         private readonly Mock<IEmailCommunicationService> _mockEmailService;
         private readonly Mock<ITokenService> _mockTokenService;
         private readonly Mock<ILoggingService> _mockLogService;
+        private readonly Mock<IConfiguration> _mockConfigration;
         private readonly AuthController _controller;
 
         public AuthControllerTests()
@@ -52,6 +54,7 @@ namespace Ecos.Api.Tests.Controllers
             _mockEmailService = new Mock<IEmailCommunicationService>();
             _mockTokenService = new Mock<ITokenService>();
             _mockLogService = new Mock<ILoggingService>();
+            _mockConfigration = new Mock<IConfiguration>();
 
             // Instantiate the AuthController with mocked dependencies
             _controller = new AuthController(
@@ -61,7 +64,8 @@ namespace Ecos.Api.Tests.Controllers
                 _mockAuthLogTableService.Object,
                 _mockEmailService.Object,
                 _mockTokenService.Object,
-                _mockLogService.Object
+                _mockLogService.Object,
+                _mockConfigration.Object
             );
 
             // Set up HttpContext with a fake IP
@@ -80,7 +84,7 @@ namespace Ecos.Api.Tests.Controllers
             var loginRequest = new LoginRequest { Email = "nonexistentuser@example.com", Password = "password123" };
             _mockUserManager.Setup(x => x.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User)null);
 
-            
+
 
             // Act
             var result = await _controller.Login(loginRequest);
@@ -127,7 +131,7 @@ namespace Ecos.Api.Tests.Controllers
                 .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
 
             var loginRequest = new LoginRequest { Email = "user@example.com", Password = "password123" };
-            
+
             // Act
             var result = await _controller.Login(loginRequest);
 

@@ -28,6 +28,7 @@ public class AuthController : ApiControllerBase
     private readonly IEmailCommunicationService _emailService;
     private readonly ITokenService _tokenService;
     private readonly ILoggingService _loggingService;
+    private readonly IConfiguration _configuration;
 
     public AuthController(
         UserManager<User> userManager,
@@ -36,7 +37,8 @@ public class AuthController : ApiControllerBase
         IAuthLogTableService authLogService,
         IEmailCommunicationService emailService,
         ITokenService tokenService,
-        ILoggingService loggingService)
+        ILoggingService loggingService,
+        IConfiguration configuration)
     {
         _userManager = userManager;
         _signInManager = signInManager;
@@ -45,6 +47,7 @@ public class AuthController : ApiControllerBase
         _emailService = emailService;
         _tokenService = tokenService;
         _loggingService = loggingService;
+        _configuration = configuration;
     }
 
     [HttpPost("login")]
@@ -227,7 +230,16 @@ public class AuthController : ApiControllerBase
 
         string token = await _userManager.GeneratePasswordResetTokenAsync(user);
         string encodedToken = HttpUtility.UrlEncode(token);
-        string resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={encodedToken}";
+        string resetUrl = "";
+        string frontendBaseUrl = _configuration["FrontendBaseUrl"];
+        if (string.IsNullOrEmpty(frontendBaseUrl))
+        {
+            resetUrl = $"{Request.Scheme}://{Request.Host}/reset-password?token={encodedToken}";
+        }
+        else
+        {
+            resetUrl = $"{frontendBaseUrl.TrimEnd('/')}/reset-password?token={encodedToken}";
+        }
 
         ForgotPasswordViewModel obj = new ForgotPasswordViewModel { ResetUrl = resetUrl };
         string emailBody = await _emailService.RenderViewToStringAsync("ForgotPassword.cshtml", obj);
