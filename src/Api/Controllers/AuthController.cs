@@ -159,7 +159,9 @@ public class AuthController : ApiControllerBase
         }
 
         // Check expiration
-        if (!DateTime.TryParse(expirationStr, out var expiration) || expiration < DateTime.UtcNow)
+        //if (!DateTime.TryParse(expirationStr, out var expiration) || expiration < DateTime.UtcNow)
+        if (!DateTimeOffset.TryParse(expirationStr, out var expiration)
+    || expiration.UtcDateTime < DateTime.UtcNow)
         {
             _logger.LogWarning("Verification code expired for email: {Email}", request.Email);
             await _authLogTableService.LogLoginAttemptAsync(request.Email, "ExpiredCode", ipAddress);
