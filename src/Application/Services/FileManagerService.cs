@@ -84,7 +84,7 @@ namespace Ecos.Application.Services
                 GetFolderPathAsync(folder.Id).Result,
                 username,
     folder.CreatedAt,
-    FormatSize(totalBytes)
+    FormatSize(totalBytes),0
             );
         }
 
@@ -158,7 +158,7 @@ namespace Ecos.Application.Services
                     using var memoryStream = new MemoryStream();
                     await file.CopyToAsync(memoryStream);
 
-                    var retryKey = fileId;
+                    var retryKey = fileId; 
 
                     var retryEntry = new FileUploadRetry
                     {
@@ -208,7 +208,7 @@ namespace Ecos.Application.Services
                 var user1 = await _userManager.FindByIdAsync(existingRoot.UserId.ToString());
                 var username1 = user1?.UserName ?? "Unknown";
                 var totalBytes1 = existingRoot.Files?.Sum(f => f.Size) ?? 0;
-                return new FolderResponse(existingRoot.Id, existingRoot.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(existingRoot.Id).Result, username1 , existingRoot.CreatedAt , FormatSize(totalBytes1));
+                return new FolderResponse(existingRoot.Id, existingRoot.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(existingRoot.Id).Result, username1 , existingRoot.CreatedAt , FormatSize(totalBytes1) ,0);
             }
 
             var rootFolder = new Folder
@@ -226,8 +226,10 @@ namespace Ecos.Application.Services
             var username = user?.UserName ?? "Unknown";
             var totalBytes = rootFolder.Files?.Sum(f => f.Size) ?? 0;
 
-            return new FolderResponse(rootFolder.Id, rootFolder.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(rootFolder.Id).Result, username, rootFolder.CreatedAt, FormatSize(totalBytes));
+            return new FolderResponse(rootFolder.Id, rootFolder.Name, new List<FileResponse>(), new List<FolderResponse>(), GetFolderPathAsync(rootFolder.Id).Result, username, rootFolder.CreatedAt, FormatSize(totalBytes),0);
         }
+
+
 
         public async Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId)
         {
@@ -240,8 +242,6 @@ namespace Ecos.Application.Services
                     UserId = f.UserId,
                     CreatedAt = f.CreatedAt,
                     Files = f.Files.Where(file => file.UserId == userId).ToList(),
-
-                    // Subfolders with only basic details, no files or deeper subfolders
                     SubFolders = f.SubFolders
                         .Where(sf => sf.UserId == userId)
                         .Select(sf => new Folder
@@ -249,9 +249,7 @@ namespace Ecos.Application.Services
                             Id = sf.Id,
                             Name = sf.Name,
                             UserId = sf.UserId,
-                            CreatedAt = sf.CreatedAt,
-                            Files = new List<FileMetadata>(),     // Empty
-                            SubFolders = new List<Folder>()       // Empty
+                            CreatedAt = sf.CreatedAt
                         }).ToList()
                 }).ToListAsync();
 
@@ -260,12 +258,13 @@ namespace Ecos.Application.Services
 
         private FolderResponse MapFolderToResponse(Folder folder)
         {
-            var folderOwner = _userManager.FindByIdAsync(folder.UserId.ToString()).Result;
+            var folderOwner = _userManager.FindByIdAsync(folder.UserId?.ToString() ?? "").Result;
             var folderUsername = folderOwner?.UserName ?? "Unknown";
-            var totalBytes = folder.Files?.Sum(f => f.Size) ?? 0;
+
+            long totalSize = 0;
 
             var fileResponses = new List<FileResponse>();
-            foreach (var file in folder.Files)
+            foreach (var file in folder.Files ?? new List<FileMetadata>())
             {
                 var uploader = _userManager.FindByIdAsync(file.UserId.ToString()).Result;
                 var uploadedBy = uploader?.UserName ?? "Unknown";
@@ -279,11 +278,37 @@ namespace Ecos.Application.Services
                     uploadedBy,
                     file.UploadedAt
                 ));
+
+                totalSize += file.Size;
             }
 
-            var subFolders = folder.SubFolders
-                .Select(sf => MapFolderToResponse(sf))
-                .ToList();
+            var subFolders = new List<FolderResponse>();
+            foreach (var sub in folder.SubFolders ?? new List<Folder>())
+            {
+                // Load file size and content count for subfolder
+                var subFileSize = _context.Files
+                    .Where(f => f.FolderId == sub.Id)
+                    .Sum(f => (long?)f.Size) ?? 0;
+
+                var subFileCount = _context.Files.Count(f => f.FolderId == sub.Id);
+                var subFolderCount = _context.Folders.Count(sf => sf.ParentFolderId == sub.Id);
+
+                totalSize += subFileSize;
+
+                subFolders.Add(new FolderResponse(
+                    sub.Id,
+                    sub.Name,
+                    new List<FileResponse>(), // Not loaded
+                    new List<FolderResponse>(), // Not loaded
+                    GetFolderPathAsync(sub.Id).Result,
+                    _userManager.FindByIdAsync(sub.UserId?.ToString() ?? "").Result?.UserName ?? "Unknown",
+                    sub.CreatedAt,
+                    FormatSize(subFileSize),
+                    subFileCount + subFolderCount
+                ));
+            }
+
+            int totalContents = fileResponses.Count + subFolders.Count;
 
             return new FolderResponse(
                 folder.Id,
@@ -293,9 +318,91 @@ namespace Ecos.Application.Services
                 GetFolderPathAsync(folder.Id).Result,
                 folderUsername,
                 folder.CreatedAt,
-                FormatSize(totalBytes)
+                FormatSize(totalSize),
+                totalContents
             );
         }
+
+        //public async Task<List<FolderResponse>> GetAllFoldersWithFilesAsync(Guid userId)
+        //{
+        //    var rootFolders = await _context.Folders
+        //        .Where(f => f.ParentFolderId == null && f.UserId == null)
+        //        .Select(f => new Folder
+        //        {
+        //            Id = f.Id,
+        //            Name = f.Name,
+        //            UserId = f.UserId,
+        //            CreatedAt = f.CreatedAt,
+        //            Files = f.Files.Where(file => file.UserId == userId).ToList(),
+
+        //            // Subfolders with only basic details, no files or deeper subfolders
+        //            SubFolders = f.SubFolders
+        //                .Where(sf => sf.UserId == userId)
+        //                .Select(sf => new Folder
+        //                {
+        //                    Id = sf.Id,
+        //                    Name = sf.Name,
+        //                    UserId = sf.UserId,
+        //                    CreatedAt = sf.CreatedAt,
+        //                    Files = new List<FileMetadata>(),     // Empty
+        //                    SubFolders = new List<Folder>()       // Empty
+        //                }).ToList()
+        //        }).ToListAsync();
+
+        //    return rootFolders.Select(f => MapFolderToResponse(f)).ToList();
+        //}
+
+        //private FolderResponse MapFolderToResponse(Folder folder)
+        //{
+        //    var folderOwner = _userManager.FindByIdAsync(folder.UserId.ToString()).Result;
+        //    var folderUsername = folderOwner?.UserName ?? "Unknown";
+        //    var totalBytes = folder.Files?.Sum(f => f.Size) ?? 0;
+
+        //    var fileResponses = new List<FileResponse>();
+        //    foreach (var file in folder.Files)
+        //    {
+        //        var uploader = _userManager.FindByIdAsync(file.UserId.ToString()).Result;
+        //        var uploadedBy = uploader?.UserName ?? "Unknown";
+
+        //        fileResponses.Add(new FileResponse(
+        //            file.Id,
+        //            file.Name,
+        //            file.BlobStorageUrl,
+        //            GetFilePathAsync(file.Id).Result,
+        //            FormatSize(file.Size),
+        //            uploadedBy,
+        //            file.UploadedAt
+        //        ));
+        //    }
+
+        //    var subFolders = folder.SubFolders
+        //        .Select(sf => MapFolderToResponse(sf))
+        //        .ToList();
+
+        //    return new FolderResponse(
+        //        folder.Id,
+        //        folder.Name,
+        //        fileResponses,
+        //        subFolders,
+        //        GetFolderPathAsync(folder.Id).Result,
+        //        folderUsername,
+        //        folder.CreatedAt,
+        //        FormatSize(totalBytes)
+        //    );
+        //}
+
+        //public async Task<FolderResponse?> GetFolderByIdAsync(Guid folderId)
+        //{
+        //    var folder = await _context.Folders
+        //        .Where(f => f.Id == folderId)
+        //        .Include(f => f.Files)
+        //        .Include(f => f.SubFolders)
+        //        .ThenInclude(sf => sf.Files)
+        //        .FirstOrDefaultAsync();
+
+        //    return folder != null ? MapFolderToResponse(folder) : null;
+        //}
+
 
         public async Task<FolderResponse?> GetFolderByIdAsync(Guid folderId)
         {
