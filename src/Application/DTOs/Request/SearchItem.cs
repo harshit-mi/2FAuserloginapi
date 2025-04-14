@@ -12,16 +12,25 @@ namespace Ecos.Application.DTOs.Request
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
-        public string Type { get; set; } = string.Empty; // "File", "Folder", etc.
-        public DateTime CreatedAt { get; set; }
+        public string Type { get; set; } = string.Empty;
 
-       
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? CreatedAt { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CreatedBy { get; set; } = string.Empty;
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? UploadedBy { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? UploadedAt { get; set; } 
+
         public List<FolderPathItem> Path { get; set; } = new();
 
         public string SizeFormatted { get; set; } = string.Empty;
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? Extension => Type == "File"
+        public string? Extension => Type == "file"
             ? System.IO.Path.GetExtension(Name)?.TrimStart('.').ToLowerInvariant()
             : null;
 
@@ -32,8 +41,6 @@ namespace Ecos.Application.DTOs.Request
         public List<SearchItem>? SubFolders { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public int? TotalContents => Type == "Folder"
-            ? (Files?.Count ?? 0) + (SubFolders?.Count ?? 0)
-            : null;
+        public int? TotalContents { get; set; }
     }
 }

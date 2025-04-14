@@ -632,20 +632,24 @@ namespace Ecos.Application.Services
 
             var foldersRaw = await _context.Folders
                 .Where(f => f.Name.ToLower().Contains(lowerQuery) && f.UserId == userId)
-                .Include(f => f.Files.Where(file => file.UserId == userId))
-                .Include(f => f.SubFolders.Where(sub => sub.UserId == userId))
                 .ToListAsync();
 
             var fileItems = new List<SearchItem>();
             foreach (var file in filesRaw)
             {
                 var path = await GetFilePathAsync(file.Id);
+                var uploader = await _userManager.FindByIdAsync(file.UserId.ToString());
+                var uploadedBy = uploader?.UserName ?? "Unknown";
+
                 fileItems.Add(new SearchItem
                 {
                     Id = file.Id,
                     Name = file.Name,
-                    Type = "File",
-                    CreatedAt = file.UploadedAt,
+                    Type = "file",
+                    CreatedAt = null,
+                    CreatedBy = null,
+                    UploadedAt = file.UploadedAt,
+                    UploadedBy= uploadedBy,
                     SizeFormatted = FormatSize(file.Size),
                     Path = path
                 });
@@ -655,31 +659,32 @@ namespace Ecos.Application.Services
             foreach (var folder in foldersRaw)
             {
                 var path = await GetFolderPathAsync(folder.Id);
-                var totalBytes = folder.Files?.Sum(f => f.Size) ?? 0;
+                var folderOwner = await _userManager.FindByIdAsync(folder.UserId?.ToString() ?? "");
+                var folderUsername = folderOwner?.UserName ?? "Unknown";
+
+                // Total size from files within this folder only
+                var totalSize = await _context.Files
+                    .Where(f => f.FolderId == folder.Id && f.UserId == userId)
+                    .SumAsync(f => (long?)f.Size) ?? 0;
+
+                // Total contents (files + subfolders)
+                var fileCount = await _context.Files.CountAsync(f => f.FolderId == folder.Id && f.UserId == userId);
+                var subFolderCount = await _context.Folders.CountAsync(sf => sf.ParentFolderId == folder.Id && sf.UserId == userId);
 
                 folderItems.Add(new SearchItem
                 {
                     Id = folder.Id,
                     Name = folder.Name,
-                    Type = "Folder",
+                    Type = "folder",
                     CreatedAt = folder.CreatedAt,
-                    SizeFormatted = FormatSize(totalBytes),
+                    SizeFormatted = FormatSize(totalSize),
                     Path = path,
-                    Files = folder.Files?.Select(f => new SearchItem
-                    {
-                        Id = f.Id,
-                        Name = f.Name,
-                        Type = "File",
-                        CreatedAt = f.UploadedAt,
-                        SizeFormatted = FormatSize(f.Size)
-                    }).ToList(),
-                    SubFolders = folder.SubFolders?.Select(sf => new SearchItem
-                    {
-                        Id = sf.Id,
-                        Name = sf.Name,
-                        Type = "Folder",
-                        CreatedAt = sf.CreatedAt
-                    }).ToList()
+                    CreatedBy = folderUsername,
+                    UploadedAt = null,
+                    UploadedBy = null,
+                    Files = null,
+                    SubFolders = null,
+                    TotalContents = fileCount + subFolderCount
                 });
             }
 
@@ -689,5 +694,6 @@ namespace Ecos.Application.Services
                 Folders = folderItems
             };
         }
+
     }
 }
