@@ -592,22 +592,59 @@ namespace Ecos.Application.Services
             }
         }
 
+        //public async Task<bool> RenameFileAsync(Guid fileId, string newName)
+        //{
+        //    var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
+        //    if (file == null) return false;
+
+        //    // Get current extension
+        //    var currentExtension = Path.GetExtension(file.Name);
+
+        //    // Remove any extension from the new name
+        //    var baseName = Path.GetFileNameWithoutExtension(newName);
+
+        //    // Build final name with original extension
+        //    file.Name = $"{baseName}{currentExtension}";
+
+        //    _context.Files.Update(file);
+        //    await _context.SaveChangesAsync();
+        //    return true;
+        //}
+
         public async Task<bool> RenameFileAsync(Guid fileId, string newName)
         {
             var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
             if (file == null) return false;
 
-            // Get current extension
             var currentExtension = Path.GetExtension(file.Name);
+            var baseNewName = Path.GetFileNameWithoutExtension(newName);
 
-            // Remove any extension from the new name
-            var baseName = Path.GetFileNameWithoutExtension(newName);
+            var finalFileName = $"{baseNewName}{currentExtension}";
+            var newBlobFileName = $"{baseNewName}_{fileId}{currentExtension}";
 
-            // Build final name with original extension
-            file.Name = $"{baseName}{currentExtension}";
+            var uniqueFileName = $"{Path.GetFileNameWithoutExtension(file.Name)}_{file.Id}{Path.GetExtension(file.Name)}";
+
+            var container = _blobServiceClient.GetBlobContainerClient(_containerName);
+            var sourceBlob = container.GetBlobClient(uniqueFileName);
+            var destBlob = container.GetBlobClient(newBlobFileName);
+
+            if (!await sourceBlob.ExistsAsync())
+                return false;
+
+            await using var sourceStream = new MemoryStream();
+            await (await sourceBlob.DownloadStreamingAsync()).Value.Content.CopyToAsync(sourceStream);
+            sourceStream.Position = 0;
+
+            await destBlob.UploadAsync(sourceStream, new BlobHttpHeaders { ContentType = file.ContentType });
+
+            await sourceBlob.DeleteIfExistsAsync();
+
+            file.Name = finalFileName;
+            file.BlobStorageUrl = destBlob.Uri.ToString();
 
             _context.Files.Update(file);
             await _context.SaveChangesAsync();
+
             return true;
         }
 
